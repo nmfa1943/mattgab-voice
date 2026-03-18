@@ -1,0 +1,15 @@
+{
+  "name": "mattgab-voice",
+  "version": "1.0.0",
+  "description": "Mattgab Management Voice AI - ConversationRelay Server",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "@fastify/websocket": "^10.0.1",
+    "@anthropic-ai/sdk": "^0.30.1",
+    "twilio": "^5.3.5"
+  }
+}
