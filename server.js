@@ -1,5 +1,6 @@
 const Fastify = require('fastify');
 const fastifyWs = require('@fastify/websocket');
+const fastifyFormBody = require('@fastify/formbody');
 const Anthropic = require('@anthropic-ai/sdk');
 const twilio = require('twilio');
 
@@ -154,6 +155,7 @@ function detectSmsIntent(text) {
 // ============================================================
 const fastify = Fastify({ logger: true });
 fastify.register(fastifyWs);
+fastify.register(fastifyFormBody);
 
 // Health check
 fastify.get('/', async (request, reply) => {
