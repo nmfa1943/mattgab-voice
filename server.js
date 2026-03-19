@@ -26,7 +26,7 @@ const PROPERTIES = {
 1 bedroom: thirteen hundred dollars per month regular price — ONE unit available at the special price of eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: seventeen hundred dollars per month regular price — ONE unit available at the special price of fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: nineteen hundred dollars per month regular price — ONE unit available at the special price of eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. Para ayuda en español, diga español ahora. How can I help you today?",
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. For Spanish, press 9. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
@@ -35,7 +35,7 @@ const PROPERTIES = {
     units: `
 1 bedroom: fourteen hundred dollars per month.
 2 bedroom: seventeen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. Para ayuda en español, diga español ahora. How can I help you today?",
+    greeting_en: "Thank you for calling Windsong Apartments. For Spanish, press 9. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
@@ -184,8 +184,10 @@ fastify.post('/voice', async (request, reply) => {
       voice="Matthew-Neural"
       ttsProvider="Amazon"
       language="en-US"
+      transcriptionProvider="Amazon"
+      dtmfDetection="true"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" transcriptionProvider="Amazon" />
     </ConversationRelay>
   </Connect>
 </Response>`);
@@ -214,6 +216,7 @@ fastify.register(async function(fastify) {
             from,
             property,
             isSpanish: false,
+            languageSwitched: false,
             sent: [],
             conversation: [
               { role: 'system', content: buildSystemPrompt(property) }
@@ -222,6 +225,22 @@ fastify.register(async function(fastify) {
 
           ws.callSid = callSid;
           console.log(`Call started: ${callSid} To:${to} From:${from}`);
+          break;
+        }
+
+        // Caller pressed a key (DTMF)
+        case 'dtmf': {
+          const session = sessions.get(ws.callSid);
+          if (!session) break;
+          const digit = msg.digit || '';
+          console.log(`DTMF pressed: ${digit}`);
+          // Press 9 for Spanish
+          if (digit === '9' && !session.isSpanish) {
+            session.isSpanish = true;
+            session.languageSwitched = true;
+            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
+            ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
+          }
           break;
         }
 
