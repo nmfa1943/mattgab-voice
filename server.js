@@ -26,7 +26,7 @@ const PROPERTIES = {
 1 bedroom: thirteen hundred dollars per month regular price — ONE unit available at the special price of eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: seventeen hundred dollars per month regular price — ONE unit available at the special price of fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: nineteen hundred dollars per month regular price — ONE unit available at the special price of eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. Para español, oprima 2. How can I help you today?",
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. Hola, para español hable en español ahora. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
@@ -35,7 +35,7 @@ const PROPERTIES = {
     units: `
 1 bedroom: fourteen hundred dollars per month.
 2 bedroom: seventeen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. Para español, oprima 2. How can I help you today?",
+    greeting_en: "Thank you for calling Windsong Apartments. Hola, para español hable en español ahora. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
@@ -255,26 +255,6 @@ fastify.register(async function(fastify) {
           break;
         }
 
-        // Caller pressed a key (DTMF)
-        case 'dtmf': {
-          const digit = msg.digit || '';
-          console.log(`DTMF pressed: ${digit}`);
-          // Press 2 for Spanish
-          if (digit === '2') {
-            ws.pendingSpanish = true;
-            const session = sessions.get(ws.callSid);
-            if (session && !session.isSpanish) {
-              session.isSpanish = true;
-              session.languageSwitched = true;
-              ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
-              setTimeout(() => {
-                ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
-              }, 300);
-            }
-          }
-          break;
-        }
-
         // Caller spoke
         case 'prompt': {
           const session = sessions.get(ws.callSid);
@@ -283,22 +263,17 @@ fastify.register(async function(fastify) {
           const text = msg.voicePrompt || '';
           console.log(`Caller said: ${text}`);
 
-          // Detect Spanish — broader detection
-          const spanishWords = ['hola','buscando','apartamento','renta','gracias','español','espanol','por favor','necesito','quiero','cuanto','precio','disponible','mantenimiento','ayuda','buenos','cuarto','llamando','habla','si ','sí ','como','cuando','donde','queria','quisiera'];
-          const isSpanishInput = spanishWords.some(w => text.toLowerCase().includes(w));
-          if (isSpanishInput) session.isSpanish = true;
+          // Detect Spanish automatically
+          const spanishWords = ['hola','buscando','apartamento','renta','gracias','español','espanol','por favor','necesito','quiero','cuanto','precio','disponible','mantenimiento','ayuda','buenos','cuarto','llamando','habla','como','cuando','donde','queria','quisiera','busco','tengo','puedo','puede','hay','quiero','quisiera','llamo','llame'];
+          const lowerText = text.toLowerCase();
+          const isSpanishInput = spanishWords.some(w => lowerText.includes(w));
 
-          // Handle "español" trigger — switch language
-          if (/español|espanol/i.test(text)) {
+          if (isSpanishInput && !session.isSpanish) {
             session.isSpanish = true;
-            // Tell ConversationRelay to switch to Spanish voice and STT
+            session.languageSwitched = true;
+            console.log('Spanish detected — switching language');
             ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
-            ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
-            break;
-          }
-
-          // If Spanish detected mid-conversation, send language switch
-          if (session.isSpanish && !session.languageSwitched) {
+          } else if (session.isSpanish && !session.languageSwitched) {
             session.languageSwitched = true;
             ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
           }
