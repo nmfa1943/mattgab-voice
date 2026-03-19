@@ -184,10 +184,9 @@ fastify.post('/voice', async (request, reply) => {
       voice="Matthew-Neural"
       ttsProvider="Amazon"
       language="en-US"
-      transcriptionProvider="Amazon"
       dtmfDetection="true"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" transcriptionProvider="Amazon" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
