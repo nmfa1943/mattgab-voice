@@ -84,10 +84,11 @@ MEMORY: NEVER re-ask something already answered in this conversation.
 RESPONSE LENGTH: Maximum 2 sentences. One answer + one question. Short and natural.
 
 QUALIFICATION — ask only the most important ones, ONE at a time, naturally spaced:
-1. Move-in timeline
-2. Number of occupants
-3. Employment ("Just to help point you in the right direction, are you currently working?")
-4. How they heard about us
+1. Name — ask early: "May I get your name?"
+2. Move-in timeline
+3. Number of occupants
+4. Employment ("Just to help point you in the right direction, are you currently working?")
+5. How they heard about us
 
 LEASING FLOW:
 - Greet → Qualify briefly → Present unit → Handle questions → Urgency → Tour link → Close warmly
@@ -314,12 +315,16 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
+            // Extract caller name from conversation if mentioned
+            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
+            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
+
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
             const transcript = `
 MATTGAB MANAGEMENT — CALL TRANSCRIPT
 ======================================
 Property:  ${session.property?.name || 'Unknown'}
-Caller:    ${session.from || 'Unknown'}
+Caller:    ${session.from || 'Unknown'} ${callerName !== 'Unknown' ? '(' + callerName + ')' : ''}
 Date/Time: ${callDate}
 ======================================
 
