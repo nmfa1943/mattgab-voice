@@ -172,23 +172,10 @@ fastify.post('/voice', async (request, reply) => {
     ? property.greeting_en
     : 'Thank you for calling Mattgab Management. How can I help you today?';
 
-  const wsUrl = `wss://mattgab-voice-production.up.railway.app/ws`;
-
   reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <ConversationRelay
-      url="${wsUrl}"
-      welcomeGreeting="${greeting}"
-      voice="Joanna-Generative"
-      ttsProvider="Amazon"
-      transcriptionProvider="Amazon"
-      language="en-US"
-      dtmfDetection="true"
-      interruptByDtmf="true"
-    >
-      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
-    </ConversationRelay>
+    <ConversationRelay url="wss://mattgab-voice-production.up.railway.app/ws" welcomeGreeting="${greeting}" />
   </Connect>
 </Response>`);
 });
