@@ -196,6 +196,17 @@ fastify.post('/voice', async (request, reply) => {
 fastify.register(async function(fastify) {
   fastify.get('/ws', { websocket: true }, (ws, req) => {
 
+    // Keepalive ping every 10 seconds to prevent connection timeout
+    const keepAlive = setInterval(() => {
+      if (ws.readyState === ws.OPEN) {
+        ws.ping();
+      }
+    }, 10000);
+
+    ws.on('pong', () => {
+      // Connection is alive
+    });
+
     ws.on('message', async (raw) => {
       let msg;
       try { msg = JSON.parse(raw); } catch { return; }
@@ -237,8 +248,13 @@ fastify.register(async function(fastify) {
           if (digit === '9' && !session.isSpanish) {
             session.isSpanish = true;
             session.languageSwitched = true;
+            // Send language switch first, then greeting
             ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
-            ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
+            // Small delay then send greeting
+            setTimeout(() => {
+              ws.send(JSON.stringify({ type: 'text', token: 'Gracias por llamar. ', last: false }));
+              ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
+            }, 500);
           }
           break;
         }
@@ -374,6 +390,7 @@ End of transcript
     });
 
     ws.on('close', () => {
+      clearInterval(keepAlive);
       if (ws.callSid) {
         const session = sessions.get(ws.callSid);
         if (session && session.conversation.length > 1) {
