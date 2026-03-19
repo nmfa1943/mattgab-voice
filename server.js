@@ -183,13 +183,13 @@ fastify.post('/voice', async (request, reply) => {
     <ConversationRelay
       url="wss://mattgab-voice-production.up.railway.app/ws"
       welcomeGreeting="${greeting}"
-      voice="Matthew-Neural"
+      voice="Lupe-Neural"
       ttsProvider="Amazon"
       language="en-US"
       transcriptionLanguage="multi"
       dtmfDetection="true"
     >
-      <Language code="es-US" ttsProvider="Google" voice="es-US-Neural2-B" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
@@ -277,8 +277,8 @@ fastify.register(async function(fastify) {
               type: 'language', 
               ttsLanguage: 'es-US',
               transcriptionLanguage: 'es-US',
-              voice: 'es-US-Neural2-B',
-              ttsProvider: 'Google'
+              voice: 'Lupe-Neural',
+              ttsProvider: 'Amazon'
             }));
           } else if (session.isSpanish && !session.languageSwitched) {
             session.languageSwitched = true;
@@ -286,8 +286,8 @@ fastify.register(async function(fastify) {
               type: 'language', 
               ttsLanguage: 'es-US',
               transcriptionLanguage: 'es-US',
-              voice: 'es-US-Neural2-B',
-              ttsProvider: 'Google'
+              voice: 'Lupe-Neural',
+              ttsProvider: 'Amazon'
             }));
           }
 
