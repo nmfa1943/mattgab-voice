@@ -181,11 +181,11 @@ fastify.post('/voice', async (request, reply) => {
     <ConversationRelay
       url="wss://mattgab-voice-production.up.railway.app/ws"
       welcomeGreeting="${greeting}"
-      voice="Joanna-Generative"
+      voice="Matthew-Neural"
       ttsProvider="Amazon"
       language="en-US"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
@@ -233,17 +233,24 @@ fastify.register(async function(fastify) {
           const text = msg.voicePrompt || '';
           console.log(`Caller said: ${text}`);
 
-          // Detect Spanish
-          const spanishWords = ['hola','buscando','apartamento','renta','gracias','español','espanol','por favor','necesito','quiero','cuanto','precio'];
+          // Detect Spanish — broader detection
+          const spanishWords = ['hola','buscando','apartamento','renta','gracias','español','espanol','por favor','necesito','quiero','cuanto','precio','disponible','mantenimiento','ayuda','buenos','cuarto','llamando','habla','si ','sí ','como','cuando','donde','queria','quisiera'];
           const isSpanishInput = spanishWords.some(w => text.toLowerCase().includes(w));
           if (isSpanishInput) session.isSpanish = true;
 
           // Handle "español" trigger — switch language
-          if (/\bespañol\b|\bespanol\b/i.test(text)) {
+          if (/español|espanol/i.test(text)) {
             session.isSpanish = true;
+            // Tell ConversationRelay to switch to Spanish voice and STT
+            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
             ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
-            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', speechModelLanguage: 'es-US' }));
             break;
+          }
+
+          // If Spanish detected mid-conversation, send language switch
+          if (session.isSpanish && !session.languageSwitched) {
+            session.languageSwitched = true;
+            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
           }
 
           // Add to conversation
