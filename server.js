@@ -127,7 +127,15 @@ RULES
 - NEVER send to office unless emergency or caller asks for person
 - Person requested: ${OFFICE_PHONE}, ${OFFICE_HOURS}
 - When sending a link say: "I am sending you the link right now" — the system will text it automatically
-- Always end the call with: "Feel free to call or text this number anytime if you have questions — we are here to help!"`;
+- Always end the call with: "Feel free to call or text this number anytime if you have questions — we are here to help!"
+
+PRONUNCIATION RULES — CRITICAL FOR VOICE:
+- NEVER use $ signs or symbols — always write out "dollars" in full
+- NEVER use the word "regular" — say "standard price" or "standard rate" instead
+- Write all prices as full words: "thirteen hundred dollars" not "1,300" or "$1,300"
+- Write all numbers as words when speaking about prices: "thirty five dollars" not "$35"
+- NEVER mix Spanish pronunciation into English sentences — if speaking English, use only English words
+- In English responses, avoid Spanish words entirely even for property terms`
 }
 
 // ============================================================
@@ -183,13 +191,12 @@ fastify.post('/voice', async (request, reply) => {
     <ConversationRelay
       url="wss://mattgab-voice-production.up.railway.app/ws"
       welcomeGreeting="${greeting}"
-      voice="Lupe-Neural"
-      ttsProvider="Amazon"
+      voice="Lrd8QHYUxHOQgV6Kbgy4"
+      ttsProvider="ElevenLabs"
       language="en-US"
       transcriptionLanguage="multi"
       dtmfDetection="true"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
@@ -276,18 +283,14 @@ fastify.register(async function(fastify) {
             ws.send(JSON.stringify({ 
               type: 'language', 
               ttsLanguage: 'es-US',
-              transcriptionLanguage: 'es-US',
-              voice: 'Lupe-Neural',
-              ttsProvider: 'Amazon'
+              transcriptionLanguage: 'es-US'
             }));
           } else if (session.isSpanish && !session.languageSwitched) {
             session.languageSwitched = true;
             ws.send(JSON.stringify({ 
               type: 'language', 
               ttsLanguage: 'es-US',
-              transcriptionLanguage: 'es-US',
-              voice: 'Lupe-Neural',
-              ttsProvider: 'Amazon'
+              transcriptionLanguage: 'es-US'
             }));
           }
 
