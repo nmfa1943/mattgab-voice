@@ -23,9 +23,9 @@ const PROPERTIES = {
     name: 'North Mountain Foothills Apartments',
     address: '1943 W Aster Drive, Phoenix AZ',
     units: `
-1 bedroom: $1,300/month regular — ONE unit available at special price of $1,100/month. 650 sq ft, 1 bed, 1 bath.
-2 bedroom: $1,700/month regular — ONE unit available at special price of $1,500/month. 880 sq ft, 2 bed, 1.5 bath.
-3 bedroom: $1,900/month regular — ONE unit available at special price of $1,800/month. 1,080 sq ft, 3 bed, 2 bath.`,
+1 bedroom: thirteen hundred dollars per month regular price — ONE unit available at the special price of eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
+2 bedroom: seventeen hundred dollars per month regular price — ONE unit available at the special price of fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
+3 bedroom: nineteen hundred dollars per month regular price — ONE unit available at the special price of eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. Para ayuda en español, diga español ahora. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
@@ -33,8 +33,8 @@ const PROPERTIES = {
     name: 'Windsong Apartments',
     address: '1414 N 34th Street, Phoenix AZ',
     units: `
-1 bedroom: $1,400/month.
-2 bedroom: $1,700/month.`,
+1 bedroom: fourteen hundred dollars per month.
+2 bedroom: seventeen hundred dollars per month.`,
     greeting_en: "Thank you for calling Windsong Apartments. Para ayuda en español, diga español ahora. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
@@ -83,21 +83,21 @@ MEMORY: NEVER re-ask something already answered in this conversation.
 
 RESPONSE LENGTH: Maximum 2 sentences. One answer + one question. Short and natural.
 
-QUALIFICATION — ask ONE at a time, naturally spaced through conversation:
+QUALIFICATION — ask only the most important ones, ONE at a time, naturally spaced:
 1. Move-in timeline
-2. Where they currently live
-3. How long at current place
-4. Work schedule (say: "We work around any schedule including weekends")
-5. Number of occupants
-6. Employment ("Just to help point you in the right direction, are you currently working?")
-7. How they heard about us
+2. Number of occupants
+3. Employment ("Just to help point you in the right direction, are you currently working?")
+4. How they heard about us
 
 LEASING FLOW:
-- Greet → Qualify gradually → Present unit briefly → Handle questions → Urgency → Tour → Application
-- When offering tour: "I am sending you the tour link right now" then ask one more question
+- Greet → Qualify briefly → Present unit → Handle questions → Urgency → Tour link → Close warmly
+- When offering tour: "I am sending you the tour link right now — you can pick a time that works best for you" — do NOT ask about scheduling, the caller picks their own time through the link
 - When offering application: "I am sending you the application link right now"
 - Urgency: "We only have one unit at that special — they go fast"
 - Weekend schedule: "We can arrange a showing any time, including weekends"
+
+CLOSING — before ending every call say:
+"Feel free to call or text this number anytime if you have questions — we are here to help!"
 
 =============================================================
 MAINTENANCE
@@ -116,13 +116,15 @@ ALL OTHERS: Direct to portal. "Our team will follow up to schedule."
 RULES
 =============================================================
 - If caller speaks Spanish, respond entirely in Spanish
-- 2 sentences MAX — always end with one question
+- 2 sentences MAX — always end with one question or next step
 - Professional and warm — never "Hey there", "Awesome", "No problem"
 - NEVER re-ask something already said in this conversation
 - NEVER state availability dates
+- NEVER ask what time or day works for a tour — the caller picks from the link themselves
 - NEVER send to office unless emergency or caller asks for person
 - Person requested: ${OFFICE_PHONE}, ${OFFICE_HOURS}
-- When sending a link say: "I am sending you the link right now" — the system will text it automatically`;
+- When sending a link say: "I am sending you the link right now" — the system will text it automatically
+- Always end the call with: "Feel free to call or text this number anytime if you have questions — we are here to help!"`;
 }
 
 // ============================================================
@@ -175,7 +177,15 @@ fastify.post('/voice', async (request, reply) => {
   reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <ConversationRelay url="wss://mattgab-voice-production.up.railway.app/ws" welcomeGreeting="${greeting}" />
+    <ConversationRelay
+      url="wss://mattgab-voice-production.up.railway.app/ws"
+      welcomeGreeting="${greeting}"
+      voice="Joanna-Generative"
+      ttsProvider="Amazon"
+      language="en-US"
+    >
+      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
+    </ConversationRelay>
   </Connect>
 </Response>`);
 });
