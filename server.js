@@ -26,7 +26,7 @@ const PROPERTIES = {
 1 bedroom: thirteen hundred dollars per month regular price — ONE unit available at the special price of eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: seventeen hundred dollars per month regular price — ONE unit available at the special price of fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: nineteen hundred dollars per month regular price — ONE unit available at the special price of eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. Hola, para español hable en español ahora. How can I help you today?",
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
@@ -35,7 +35,7 @@ const PROPERTIES = {
     units: `
 1 bedroom: fourteen hundred dollars per month.
 2 bedroom: seventeen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. Hola, para español hable en español ahora. How can I help you today?",
+    greeting_en: "Thank you for calling Windsong Apartments. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
@@ -186,9 +186,10 @@ fastify.post('/voice', async (request, reply) => {
       voice="Matthew-Neural"
       ttsProvider="Amazon"
       language="en-US"
+      transcriptionLanguage="multi"
       dtmfDetection="true"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Miguel-Neural" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
@@ -272,10 +273,22 @@ fastify.register(async function(fastify) {
             session.isSpanish = true;
             session.languageSwitched = true;
             console.log('Spanish detected — switching language');
-            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
+            ws.send(JSON.stringify({ 
+              type: 'language', 
+              ttsLanguage: 'es-US', 
+              transcriptionLanguage: 'es-US',
+              voice: 'Lupe-Neural',
+              ttsProvider: 'Amazon'
+            }));
           } else if (session.isSpanish && !session.languageSwitched) {
             session.languageSwitched = true;
-            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
+            ws.send(JSON.stringify({ 
+              type: 'language', 
+              ttsLanguage: 'es-US', 
+              transcriptionLanguage: 'es-US',
+              voice: 'Lupe-Neural',
+              ttsProvider: 'Amazon'
+            }));
           }
 
           // Add to conversation
