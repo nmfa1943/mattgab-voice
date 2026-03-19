@@ -26,7 +26,7 @@ const PROPERTIES = {
 1 bedroom: thirteen hundred dollars per month regular price — ONE unit available at the special price of eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: seventeen hundred dollars per month regular price — ONE unit available at the special price of fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: nineteen hundred dollars per month regular price — ONE unit available at the special price of eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. For Spanish, press 9. How can I help you today?",
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. Para español, oprima 2. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
@@ -35,7 +35,7 @@ const PROPERTIES = {
     units: `
 1 bedroom: fourteen hundred dollars per month.
 2 bedroom: seventeen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. For Spanish, press 9. How can I help you today?",
+    greeting_en: "Thank you for calling Windsong Apartments. Para español, oprima 2. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
@@ -91,11 +91,13 @@ QUALIFICATION — ask only the most important ones, ONE at a time, naturally spa
 5. How they heard about us
 
 LEASING FLOW:
-- Greet → Qualify briefly → Present unit → Handle questions → Urgency → Tour link → Close warmly
+- Greet → Qualify briefly → Present unit → Handle questions → Urgency → Tour link → Offer application → Close warmly
 - When offering tour: "I am sending you the tour link right now — you can pick a time that works best for you" — do NOT ask about scheduling, the caller picks their own time through the link
+- After sending tour link, always follow up with: "Would you also like me to send you the application link so you can get a head start?"
 - When offering application: "I am sending you the application link right now"
 - Urgency: "We only have one unit at that special — they go fast"
 - Weekend schedule: "We can arrange a showing any time, including weekends"
+- NEVER end the call abruptly — always offer the application link before saying goodbye if it hasn't been sent
 
 CLOSING — before ending every call say:
 "Feel free to call or text this number anytime if you have questions — we are here to help!"
@@ -235,26 +237,40 @@ fastify.register(async function(fastify) {
 
           ws.callSid = callSid;
           console.log(`Call started: ${callSid} To:${to} From:${from}`);
+
+          // Apply pending Spanish switch if 9 was pressed before setup
+          if (ws.pendingSpanish) {
+            const s = sessions.get(callSid);
+            if (s) {
+              s.isSpanish = true;
+              s.languageSwitched = true;
+              setTimeout(() => {
+                ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
+                setTimeout(() => {
+                  ws.send(JSON.stringify({ type: 'text', token: s.property.greeting_es, last: true }));
+                }, 300);
+              }, 200);
+            }
+          }
           break;
         }
 
         // Caller pressed a key (DTMF)
         case 'dtmf': {
-          const session = sessions.get(ws.callSid);
-          if (!session) break;
           const digit = msg.digit || '';
           console.log(`DTMF pressed: ${digit}`);
-          // Press 9 for Spanish
-          if (digit === '9' && !session.isSpanish) {
-            session.isSpanish = true;
-            session.languageSwitched = true;
-            // Send language switch first, then greeting
-            ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
-            // Small delay then send greeting
-            setTimeout(() => {
-              ws.send(JSON.stringify({ type: 'text', token: 'Gracias por llamar. ', last: false }));
-              ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
-            }, 500);
+          // Press 2 for Spanish
+          if (digit === '2') {
+            ws.pendingSpanish = true;
+            const session = sessions.get(ws.callSid);
+            if (session && !session.isSpanish) {
+              session.isSpanish = true;
+              session.languageSwitched = true;
+              ws.send(JSON.stringify({ type: 'language', ttsLanguage: 'es-US', transcriptionLanguage: 'es-US' }));
+              setTimeout(() => {
+                ws.send(JSON.stringify({ type: 'text', token: session.property.greeting_es, last: true }));
+              }, 300);
+            }
           }
           break;
         }
