@@ -172,9 +172,7 @@ fastify.post('/voice', async (request, reply) => {
     ? property.greeting_en
     : 'Thank you for calling Mattgab Management. How can I help you today?';
 
-  const wsUrl = process.env.RAILWAY_PUBLIC_DOMAIN
-    ? `wss://${process.env.RAILWAY_PUBLIC_DOMAIN}/ws`
-    : `wss://${request.hostname}/ws`;
+  const wsUrl = `wss://mattgab-voice-production.up.railway.app/ws`;
 
   reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -182,15 +180,14 @@ fastify.post('/voice', async (request, reply) => {
     <ConversationRelay
       url="${wsUrl}"
       welcomeGreeting="${greeting}"
-      voice="Polly.Joanna-Generative"
+      voice="Joanna-Generative"
       ttsProvider="Amazon"
       transcriptionProvider="Amazon"
-      speechModel="nova-2"
       language="en-US"
       dtmfDetection="true"
       interruptByDtmf="true"
     >
-      <Language code="es-US" ttsProvider="Amazon" voice="Polly.Lupe-Neural" speechModel="nova-2" />
+      <Language code="es-US" ttsProvider="Amazon" voice="Lupe-Neural" />
     </ConversationRelay>
   </Connect>
 </Response>`);
