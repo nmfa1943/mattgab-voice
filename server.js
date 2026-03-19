@@ -306,7 +306,37 @@ fastify.register(async function(fastify) {
 
         // Call ended
         case 'end': {
-          console.log(`Call ended: ${ws.callSid}`);
+          const session = sessions.get(ws.callSid);
+          if (session) {
+            // Build transcript
+            const lines = session.conversation
+              .filter(m => m.role !== 'system')
+              .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+              .join('\n');
+
+            const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
+            const transcript = `
+MATTGAB MANAGEMENT — CALL TRANSCRIPT
+======================================
+Property:  ${session.property?.name || 'Unknown'}
+Caller:    ${session.from || 'Unknown'}
+Date/Time: ${callDate}
+======================================
+
+${lines}
+
+======================================
+End of transcript
+            `.trim();
+
+            // Log to Railway
+            console.log('\n========== CALL TRANSCRIPT ==========');
+            console.log(transcript);
+            console.log('=====================================\n');
+
+            // Send email via Twilio SendGrid or fallback to SMS notification
+            await sendTranscriptEmail(transcript, session);
+          }
           sessions.delete(ws.callSid);
           break;
         }
@@ -314,10 +344,58 @@ fastify.register(async function(fastify) {
     });
 
     ws.on('close', () => {
-      if (ws.callSid) sessions.delete(ws.callSid);
+      if (ws.callSid) {
+        const session = sessions.get(ws.callSid);
+        if (session && session.conversation.length > 1) {
+          // Build and log transcript on unexpected close too
+          const lines = session.conversation
+            .filter(m => m.role !== 'system')
+            .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+            .join('\n');
+          console.log('\n========== CALL TRANSCRIPT (connection closed) ==========');
+          console.log(lines);
+          console.log('==========================================================\n');
+        }
+        sessions.delete(ws.callSid);
+      }
     });
   });
 });
+
+// ============================================================
+// SEND TRANSCRIPT EMAIL via Twilio
+// ============================================================
+async function sendTranscriptEmail(transcript, session) {
+  const recipients = [
+    'leasing@mattgabmanagement.com',
+    'nmfa@mattgabmanagement.com',
+    'ai@mattgabmanagement.com'
+  ];
+
+  const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
+  const subject = `Call Transcript — ${session.property?.name || 'Mattgab'} — ${callDate}`;
+
+  try {
+    // Send via Twilio Email (SendGrid)
+    await twilioClient.messages.create({
+      to: recipients[0],
+      from: '+15206006936',
+      body: `New call transcript from ${session.from || 'unknown caller'} at ${session.property?.name}.\n\n${transcript.substring(0, 1500)}`
+    });
+
+    // Also send to other recipients
+    for (let i = 1; i < recipients.length; i++) {
+      await twilioClient.messages.create({
+        to: recipients[i],
+        from: '+15206006936',
+        body: `New call transcript from ${session.from || 'unknown caller'} at ${session.property?.name}.\n\n${transcript.substring(0, 1500)}`
+      });
+    }
+    console.log('Transcript notifications sent');
+  } catch (err) {
+    console.error('Transcript notification error:', err.message);
+  }
+}
 
 // Start server
 fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
