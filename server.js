@@ -33,8 +33,9 @@ const PROPERTIES = {
     name: 'Windsong Apartments',
     address: '1414 N 34th Street, Phoenix AZ',
     units: `
-1 bedroom: fourteen hundred dollars per month.
-2 bedroom: seventeen hundred dollars per month.`,
+1 bedroom: twelve hundred dollars per month — spring special.
+2 bedroom: fifteen hundred dollars per month — spring special.
+3 bedroom: eighteen hundred dollars per month — spring special.`,
     greeting_en: "Thank you for calling Windsong Apartments. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
