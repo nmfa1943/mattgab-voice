@@ -197,6 +197,47 @@ async function sendSms(to, fromNumber, body) {
 }
 
 // ============================================================
+// POST LEAD TO DASHBOARD — fires once per call, surfaces lead in /lead-api.php
+// ============================================================
+async function postLeadToDashboard(session) {
+    if (!session || !session.from || session.leadPosted) return;
+    session.leadPosted = true;
+  
+    const lines = session.conversation
+      .filter(m => m.role !== 'system')
+      .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+      .join('\n');
+  
+    const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
+    const callerName = nameMatch ? nameMatch[1] : '';
+  
+    const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
+  
+    try {
+          const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                            source: 'twilio_voice',
+                            property: session.property?.key || '',
+                            name: callerName,
+                            phone: session.from,
+                            summary,
+                            status: 'new'
+                  })
+          });
+          const out = await res.json();
+          if (out && out.success) {
+                  console.log(`Lead posted: id=${out.id} caller=${callerName || 'unnamed'} from=${session.from}`);
+          } else {
+                  console.error('Lead POST non-success:', JSON.stringify(out));
+          }
+    } catch (err) {
+          console.error('Lead POST error:', err.message);
+    }
+}
+
+// ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
 function detectSmsIntent(text) {
@@ -386,6 +427,7 @@ End of transcript
             console.log('\n========== CALL TRANSCRIPT ==========');
             console.log(transcript);
             console.log('=====================================\n');
+            await postLeadToDashboard(session);
           }
           sessions.delete(ws.callSid);
           break;
@@ -403,6 +445,7 @@ End of transcript
             .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
             .join('\n');
           console.log('\n========== CALL TRANSCRIPT (connection closed) ==========');
+          postLeadToDashboard(session).catch(e => console.error('Lead post error:', e.message));
           console.log(lines);
           console.log('==========================================================\n');
         }
