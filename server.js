@@ -238,6 +238,7 @@ fastify.post('/voice', async (request, reply) => {
       language="en-US"
       transcriptionLanguage="multi"
       dtmfDetection="true"
+      intelligenceService="GA0fb006cebd74f221ad2df9d060dbe84d"
     >
     </ConversationRelay>
   </Connect>
