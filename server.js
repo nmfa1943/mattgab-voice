@@ -29,6 +29,7 @@ const PROPERTIES = {
     neighborhood: 'Sits in North Phoenix at the foot of the North Mountain Preserve. Easy reach to the 51 freeway and Sunnyslope. Good for hikers and anyone who wants to be near the mountains without leaving the city. Quiet residential street, mature trees, the kind of complex where neighbors actually know each other.',
     phone: '602-997-2928',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
+    website: 'https://mattgabmanagement.com/nmfa/',
     units: `
 1 bedroom: starting at eleven hundred dollars per month. Six hundred fifty square feet, 1 bed, 1 bath.
 2 bedroom: starting at sixteen hundred dollars per month. Eight hundred eighty square feet, 2 bed, 1 and a half baths.
@@ -45,6 +46,7 @@ const PROPERTIES = {
     neighborhood: 'East Phoenix near 34th Street, with easy access to the 202 and 51 freeways. Quiet residential pocket with mature trees and the kind of community where neighbors actually know each other.',
     phone: '602-225-0846',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
+    website: 'https://mattgabmanagement.com/windsong/',
     units: `
 1 bedroom: starting at eleven hundred dollars per month.
 2 bedroom: starting at sixteen hundred dollars per month.
@@ -84,7 +86,7 @@ PRICING RULES:
 
 THE $500 OFF DEPOSIT SPECIAL:
 - The welcome greeting already mentions this special at the top of every call.
-- When the caller agrees to a tour OR asks about deals, specials, discounts, move-in costs, or deposits, you MUST work the special into your next response. Frame it as a reason to lock in the tour soon, not as a fallback. Example: "I'd love to send you the tour link. We also have a five hundred dollar off deposit special running while units last, so I'd love to get you in this week if you can swing it."
+- TRIGGER (REQUIRED): The first time the caller says yes/sure/okay to a tour, OR the first time they ask about deals, specials, discounts, move-in costs, or deposits, the words "five hundred dollar off deposit special" MUST appear in your VERY NEXT response. Frame it as a reason to lock the tour in soon. Example: "Wonderful! And remember, we have a five hundred dollar off deposit special running while units last, so let's get you in this week if you can swing it. I'd love to send you the tour link. Is it okay if I text it to you?" Do not skip this. Do not save it for later in the call. Use it ONCE per call after the welcome greeting.
 - Use the special once per response. Never lead a non-greeting response with it.
 
 PET POLICY:
@@ -129,10 +131,10 @@ LEASING FLOW:
 - Once consent is given, say: "I am sending you the tour link right now."
 - After the tour link, optionally offer: "Would you also like me to send you the application link so you can get a head start?"
 - When offering application: "Is it okay if I text you the application link as well?" then once consent is given, "I am sending you the application link right now."
-- Urgency: "We can arrange a showing any time, including weekends."
+- Urgency: "We have showings available Monday through Saturday, so just pick whatever works best for you."
 - NEVER end the call abruptly. Always offer the tour link before saying goodbye if it has not been sent.
 
-CLOSING — before ending every call use the caller's name and a warm wrap. Example: "Looking forward to meeting you, Mary. Reach out anytime if anything comes up, by call or text. I'm here whenever you need me." If the caller never shared a name, drop the name but keep the warmth.
+CLOSING (REQUIRED EXACT WORDING) — Your final response in every call MUST be: "Looking forward to meeting you, [Name]. Reach out anytime if anything comes up, by call or text. I'm here whenever you need me." Substitute the caller's name for [Name]. If they never gave a name, drop the name and use: "Looking forward to meeting you. Reach out anytime if anything comes up, by call or text. I'm here whenever you need me." Do NOT improvise a different sign-off. Do NOT use "Take care" or "thanks for choosing" or "Feel free to call or text". This exact wording every time.
 
 ============================================================
 SMS CONSENT RULE — REQUIRED
@@ -256,6 +258,7 @@ function detectSmsIntent(text) {
   if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
   if (/\b(application|apply)\b/.test(lower)) return 'apply';
   if (/\b(portal|service request|maintenance)\b/.test(lower)) return 'portal';
+  if (/\bwebsite\b/.test(lower)) return 'website';
   return null;
 }
 
@@ -388,7 +391,9 @@ fastify.register(async function(fastify) {
                 } else if (intent === 'apply') {
                   await sendSms(from, to, `Here's your application link for ${property.name}:\n${APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
                 } else if (intent === 'portal') {
-                  await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
+                                  await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
+                } else if (intent === 'website') {
+                                    await sendSms(from, to, `Here's the link to ${property.name}'s website:\n${property.website}\n\nReply STOP to unsubscribe.`);
                 }
               }
             });
