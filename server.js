@@ -32,7 +32,7 @@ const PROPERTIES = {
     website: 'https://mattgabmanagement.com/nmfa/',
     units: `
 1 bedroom: starting at eleven hundred dollars per month. Six hundred fifty square feet, 1 bed, 1 bath.
-2 bedroom: starting at sixteen hundred dollars per month. Eight hundred eighty square feet, 2 bed, 1 and a half baths.
+2 bedroom: starting at fifteen hundred dollars per month. Eight hundred eighty square feet, 2 bed, 1 and a half baths.
 3 bedroom: starting at eighteen hundred dollars per month. One thousand eighty square feet, 3 bed, 2 baths.`,
             greeting_en: "Hi, this is Jose at North Mountain Foothills Apartments. Para español, diga hola. We've got a five hundred dollar off deposit special running while units last. May I get your name?",
           greeting_es: "Hola, soy Jose de North Mountain Foothills Apartments. Tenemos un descuento de quinientos dólares en el depósito mientras nos queden unidades. ¿Me puede dar su nombre?"
@@ -49,7 +49,7 @@ const PROPERTIES = {
     website: 'https://mattgabmanagement.com/windsong/',
     units: `
 1 bedroom: starting at eleven hundred dollars per month.
-2 bedroom: starting at sixteen hundred dollars per month.
+2 bedroom: starting at fifteen hundred dollars per month.
 3 bedroom: starting at eighteen hundred dollars per month.`,
           greeting_en: "Hi, this is Jose at Windsong Apartments. Para español, diga hola. We've got a five hundred dollar off deposit special running while units last. May I get your name?",
           greeting_es: "Hola, soy Jose de Windsong Apartments. Tenemos un descuento de quinientos dólares en el depósito mientras nos queden unidades. ¿Me puede dar su nombre?"
@@ -218,8 +218,7 @@ async function postLeadToDashboard(session) {
       .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
       .join('\n');
   
-    const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
-    const callerName = nameMatch ? nameMatch[1] : '';
+      const callerName = extractCallerName(lines);
   
     const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
   
@@ -245,6 +244,20 @@ async function postLeadToDashboard(session) {
     } catch (err) {
           console.error('Lead POST error:', err.message);
     }
+}
+
+// ============================================================
+// EXTRACT CALLER NAME — trigger phrases first, fallback to single-name turn
+// ============================================================
+function extractCallerName(lines) {
+    const trigger = lines.match(/CALLER:[^\n]*?(?:[Mm]y name is|[Ii]'?m|[Ii] am|[Tt]his is)\s+([A-Z][a-z]+)/);
+    if (trigger) return trigger[1];
+    const single = lines.match(/CALLER:\s*([A-Z][a-z]+)\.?\s*\n/);
+    if (single) {
+          const blocked = ['Yes','No','Hello','Hi','Hey','Yeah','Yep','Sure','Okay','Ok','Bye','Goodbye','Thanks','Thank','Just','Looking','Going','Calling','Here','On','In','At','The'];
+          if (!blocked.includes(single[1])) return single[1];
+    }
+    return '';
 }
 
 // ============================================================
@@ -421,8 +434,7 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
-            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
-            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
+                        const callerName = extractCallerName(lines) || 'Unknown';
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
 
             const transcript = `
