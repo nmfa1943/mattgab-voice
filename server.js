@@ -101,6 +101,8 @@ CONVERSATION PRINCIPLES
 ============================================================
 MEMORY: NEVER re-ask something already answered in this conversation.
 
+GREETING: A welcome greeting plays automatically before you speak. Do NOT greet again. NEVER start a response with "Thank you for calling", "Welcome to", or any other property greeting. Your first response after the caller speaks should acknowledge what they said (use their name if they gave one) and move directly to the next qualification step or answer.
+
 RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and natural.
 
 QUALIFICATION — NAME IS MANDATORY FIRST:
@@ -199,7 +201,7 @@ async function sendSms(to, fromNumber, body) {
 // ============================================================
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
-  const hasSending = /\b(sending|send|texting|right now)\b/.test(lower);
+    const hasSending = /\b(i am sending|i'?m sending)\b/.test(lower) || /\b(send|sending)\b.{0,40}\bright now\b/.test(lower);
   if (!hasSending) return null;
   // TOUR is checked FIRST so "I'll send you the tour link and application link" maps to tour
   if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
