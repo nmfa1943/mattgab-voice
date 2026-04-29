@@ -26,16 +26,16 @@ const PROPERTIES = {
     short: 'NMFA',
     address: '1943 West Aster Drive, Phoenix Arizona',
     area: 'North Phoenix',
-    neighborhood: 'Sits in North Phoenix at the foot of the North Mountain Preserve. Easy reach to the 51 freeway and Sunnyslope. Good for hikers and anyone who wants to be near the mountains without leaving the city. Quiet residential street, mature trees, the kind of complex where neighbors actually know each other.',
-    phone: '602-997-2928',
+    phone: '602-997-2928 extension 1',
+    jose_number: '520-600-6936',
+    hours: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
-    website: 'https://mattgabmanagement.com/nmfa/',
     units: `
-1 bedroom: starting at eleven hundred dollars per month. Six hundred fifty square feet, 1 bed, 1 bath.
-2 bedroom: starting at fifteen hundred dollars per month. Eight hundred eighty square feet, 2 bed, 1 and a half baths.
-3 bedroom: starting at eighteen hundred dollars per month. One thousand eighty square feet, 3 bed, 2 baths.`,
-            greeting_en: "Hi, this is Jose at North Mountain Foothills Apartments. Para español, diga hola. We've got a five hundred dollar off deposit special running while units last. May I get your name?",
-          greeting_es: "Hola, soy Jose de North Mountain Foothills Apartments. Tenemos un descuento de quinientos dólares en el depósito mientras nos queden unidades. ¿Me puede dar su nombre?"
+1 bedroom: starting at eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
+2 bedroom: starting at fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
+3 bedroom: starting at eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is Jose, the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy Jose, el asistente de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -43,22 +43,22 @@ const PROPERTIES = {
     short: 'Windsong',
     address: '1414 North 34th Street, Phoenix Arizona',
     area: 'East Phoenix',
-    neighborhood: 'East Phoenix near 34th Street, with easy access to the 202 and 51 freeways. Quiet residential pocket with mature trees and the kind of community where neighbors actually know each other.',
-    phone: '602-225-0846',
+    phone: '602-997-2928 extension 2',
+    jose_number: '520-800-0759',
+    hours: 'Monday through Friday, 10 AM to 5 PM. Closed on weekends',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
-    website: 'https://mattgabmanagement.com/windsong/',
     units: `
 1 bedroom: starting at eleven hundred dollars per month.
 2 bedroom: starting at fifteen hundred dollars per month.
 3 bedroom: starting at eighteen hundred dollars per month.`,
-          greeting_en: "Hi, this is Jose at Windsong Apartments. Para español, diga hola. We've got a five hundred dollar off deposit special running while units last. May I get your name?",
-          greeting_es: "Hola, soy Jose de Windsong Apartments. Tenemos un descuento de quinientos dólares en el depósito mientras nos queden unidades. ¿Me puede dar su nombre?"
+    greeting_en: "Thank you for calling Windsong Apartments. This is Jose, the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy Jose, el asistente de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
 
-const APPLY_LINK    = 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2';
-const TENANT_PORTAL = 'https://apexm.twa.rentmanager.com';
-const OFFICE_HOURS  = 'Monday through Friday, 9 AM to 5 PM';
+const APPLY_LINK             = 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2';
+const TENANT_PORTAL          = 'https://apexm.twa.rentmanager.com';
+const MAINTENANCE_EMERGENCY  = '602-997-2928 extension 3';
 
 // ============================================================
 // SESSION STORAGE
@@ -69,9 +69,10 @@ const sessions = new Map();
 // SYSTEM PROMPT BUILDER (aligned with chat widget voice and rules)
 // ============================================================
 function buildSystemPrompt(property) {
-  return `You are a warm, professional leasing and maintenance assistant for ${property.name} at ${property.address}, managed by Mattgab Management.
+  return `You are Jose, the AI assistant for Mattgab Management. You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same Jose identity carries across chat, phone, and text. Use first-person "I" throughout.
 
-  NEIGHBORHOOD COLOR (use sparingly, when it fits): ${property.neighborhood} Drop ONE short reference when a caller asks what the area is like, or when you want to make the place feel real before naming the price. Pick one detail. Never recite the whole thing.
+ADDRESS RULE:
+Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
 
 ============================================================
 UNITS — USE ONLY THIS INFORMATION
@@ -84,10 +85,12 @@ PRICING RULES:
 - Prices are "starting at" prices. Actual rate depends on the unit.
 - Never give availability dates. Units are available now, offer a tour.
 
-THE $500 OFF DEPOSIT SPECIAL:
-- The welcome greeting already mentions this special at the top of every call.
-- TRIGGER (REQUIRED): The first time the caller says yes/sure/okay to a tour, OR the first time they ask about deals, specials, discounts, move-in costs, or deposits, the words "five hundred dollar off deposit special" MUST appear in your VERY NEXT response. Frame it as a reason to lock the tour in soon. Example: "Wonderful! And remember, we have a five hundred dollar off deposit special running while units last, so let's get you in this week if you can swing it. I'd love to send you the tour link. Is it okay if I text it to you?" Do not skip this. Do not save it for later in the call. Use it ONCE per call after the welcome greeting.
-- Use the special once per response. Never lead a non-greeting response with it.
+THE $500 MOVE-IN CREDIT:
+- We are running a $500 move-in credit for a limited time.
+- Do NOT mention this in your opening greeting.
+- Only bring it up AFTER the caller shows real interest in touring, OR asks about deals, specials, discounts, move-in costs, or deposits.
+- Treat it as a closing tool, not an opener.
+- When you mention it, say: "We also have a five hundred dollar move-in credit available for a limited time."
 
 PET POLICY:
 - Dogs and cats welcome with prior written approval.
@@ -105,18 +108,10 @@ CONVERSATION PRINCIPLES
 ============================================================
 MEMORY: NEVER re-ask something already answered in this conversation.
 
-GREETING: A welcome greeting plays automatically before you speak. Do NOT greet again. NEVER start a response with "Thank you for calling", "Welcome to", or any other property greeting. Your first response after the caller speaks should acknowledge what they said (use their name if they gave one) and move directly to the next qualification step or answer.
+RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and natural.
 
-RESPONSE LENGTH: 2 to 3 sentences. Lead with the answer. Add a brief warmth or context line when the moment calls for it (caller shares a timeline, names a concern, says yes to a tour). End with a question or next step. Vary sentence length turn to turn so it reads as conversation, not a form.
-
-VALUE BEFORE PRICE: When a caller leads with a price question, get their name first (per QUALIFICATION rule), then offer one short value beat before the number. Example: "Our 1 bedrooms start at eleven hundred dollars per month, and that includes all utilities, so you don't get surprised by separate bills each month." Always pair the price with what is included or with one neighborhood color line. Never give the number alone.
-
-EMOTIONAL ACKNOWLEDGMENT: When a caller shares a feeling (excited about moving, stressed about the timeline, frustrated with a current place, hopeful), acknowledge it briefly before continuing. Examples: "That's a great timeline to work with." "I hear you, moving is a lot." "Good for you for getting on this early." One short acknowledgment per emotional signal, maximum. Do not pile on or overdo.
-
-QUALIFICATION — NAME IS MANDATORY BEFORE PRICING:
-- The welcome greeting already asks for the caller's name; most callers will give it in their first response.
-- If they DID give a name, acknowledge warmly and move directly to move-in timeline. Do NOT ask for the name again.
-- If they did NOT give a name (e.g., they jumped straight to a price question), your first question MUST be "May I get your name?" before answering anything about pricing or units.
+QUALIFICATION — NAME IS MANDATORY FIRST:
+- Your FIRST question after greeting MUST be "May I get your name?"
 - Do not present pricing or units until you have the caller's name.
 - After name, space these out naturally one at a time:
   1. Move-in timeline
@@ -131,10 +126,10 @@ LEASING FLOW:
 - Once consent is given, say: "I am sending you the tour link right now."
 - After the tour link, optionally offer: "Would you also like me to send you the application link so you can get a head start?"
 - When offering application: "Is it okay if I text you the application link as well?" then once consent is given, "I am sending you the application link right now."
-- Urgency: "We have showings available Monday through Saturday, so just pick whatever works best for you."
+- Urgency: "We can arrange a showing any time, including weekends."
 - NEVER end the call abruptly. Always offer the tour link before saying goodbye if it has not been sent.
 
-CLOSING (REQUIRED EXACT WORDING) — Your final response in every call MUST be: "Looking forward to meeting you, [Name]. Reach out anytime if anything comes up, by call or text. I'm here whenever you need me." Substitute the caller's name for [Name]. If they never gave a name, drop the name and use: "Looking forward to meeting you. Reach out anytime if anything comes up, by call or text. I'm here whenever you need me." Do NOT improvise a different sign-off. Do NOT use "Take care" or "thanks for choosing" or "Feel free to call or text". This exact wording every time.
+CLOSING — before ending every call say: "Feel free to call or text this number anytime if you have questions. We are here to help."
 
 ============================================================
 SMS CONSENT RULE — REQUIRED
@@ -149,7 +144,7 @@ MAINTENANCE
 ============================================================
 Guide first, escalate only if unresolved.
 
-EMERGENCY (gas, flooding, fire): "Please call ${property.phone} immediately. After hours follow prompts for on-call technician."
+EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me."
 SMOKE DETECTOR: Replace 9-volt battery. If continues, direct to portal.
 OUTLET: Press GFCI Reset button (bathroom or kitchen). If continues, direct to portal.
 GARBAGE DISPOSAL: Press red reset underneath. If continues, direct to portal.
@@ -176,7 +171,7 @@ RULES
 - NEVER state availability dates.
 - NEVER ask what time or day works for a tour. The caller picks from the Calendly link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
-- Person requested: ${property.phone}, ${OFFICE_HOURS}.
+- Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me, Jose, anytime at ${property.jose_number}.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with: "Feel free to call or text this number anytime if you have questions. We are here to help."
 
@@ -207,71 +202,16 @@ async function sendSms(to, fromNumber, body) {
 }
 
 // ============================================================
-// POST LEAD TO DASHBOARD — fires once per call, surfaces lead in /lead-api.php
-// ============================================================
-async function postLeadToDashboard(session) {
-    if (!session || !session.from || session.leadPosted) return;
-    session.leadPosted = true;
-  
-    const lines = session.conversation
-      .filter(m => m.role !== 'system')
-      .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
-      .join('\n');
-  
-      const callerName = extractCallerName(lines);
-  
-    const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
-  
-    try {
-          const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                            source: 'twilio_voice',
-                            property: session.property?.key || '',
-                            name: callerName,
-                            phone: session.from,
-                            summary,
-                            status: 'new'
-                  })
-          });
-          const out = await res.json();
-          if (out && out.success) {
-                  console.log(`Lead posted: id=${out.id} caller=${callerName || 'unnamed'} from=${session.from}`);
-          } else {
-                  console.error('Lead POST non-success:', JSON.stringify(out));
-          }
-    } catch (err) {
-          console.error('Lead POST error:', err.message);
-    }
-}
-
-// ============================================================
-// EXTRACT CALLER NAME — trigger phrases first, fallback to single-name turn
-// ============================================================
-function extractCallerName(lines) {
-    const trigger = lines.match(/CALLER:[^\n]*?(?:[Mm]y name is|[Ii]'?m|[Ii] am|[Tt]his is)\s+([A-Z][a-z]+)/);
-    if (trigger) return trigger[1];
-    const single = lines.match(/CALLER:\s*([A-Z][a-z]+)\.?\s*\n/);
-    if (single) {
-          const blocked = ['Yes','No','Hello','Hi','Hey','Yeah','Yep','Sure','Okay','Ok','Bye','Goodbye','Thanks','Thank','Just','Looking','Going','Calling','Here','On','In','At','The'];
-          if (!blocked.includes(single[1])) return single[1];
-    }
-    return '';
-}
-
-// ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
-    const hasSending = /\b(i am sending|i'?m sending)\b/.test(lower) || /\b(send|sending)\b.{0,40}\bright now\b/.test(lower);
+  const hasSending = /\b(sending|send|texting|right now)\b/.test(lower);
   if (!hasSending) return null;
   // TOUR is checked FIRST so "I'll send you the tour link and application link" maps to tour
   if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
   if (/\b(application|apply)\b/.test(lower)) return 'apply';
   if (/\b(portal|service request|maintenance)\b/.test(lower)) return 'portal';
-  if (/\bwebsite\b/.test(lower)) return 'website';
   return null;
 }
 
@@ -305,7 +245,6 @@ fastify.post('/voice', async (request, reply) => {
       language="en-US"
       transcriptionLanguage="multi"
       dtmfDetection="true"
-      intelligenceService="GA0fb006cebd74f221ad2df9d060dbe84d"
     >
     </ConversationRelay>
   </Connect>
@@ -404,9 +343,7 @@ fastify.register(async function(fastify) {
                 } else if (intent === 'apply') {
                   await sendSms(from, to, `Here's your application link for ${property.name}:\n${APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
                 } else if (intent === 'portal') {
-                                  await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
-                } else if (intent === 'website') {
-                                    await sendSms(from, to, `Here's the link to ${property.name}'s website:\n${property.website}\n\nReply STOP to unsubscribe.`);
+                  await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
                 }
               }
             });
@@ -434,7 +371,8 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
-                        const callerName = extractCallerName(lines) || 'Unknown';
+            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
+            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
 
             const transcript = `
@@ -452,7 +390,6 @@ End of transcript
             console.log('\n========== CALL TRANSCRIPT ==========');
             console.log(transcript);
             console.log('=====================================\n');
-            await postLeadToDashboard(session);
           }
           sessions.delete(ws.callSid);
           break;
@@ -470,7 +407,6 @@ End of transcript
             .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
             .join('\n');
           console.log('\n========== CALL TRANSCRIPT (connection closed) ==========');
-          postLeadToDashboard(session).catch(e => console.error('Lead post error:', e.message));
           console.log(lines);
           console.log('==========================================================\n');
         }
