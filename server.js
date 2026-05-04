@@ -27,15 +27,15 @@ const PROPERTIES = {
     address: '1943 West Aster Drive, Phoenix Arizona',
     area: 'North Phoenix',
     phone: '602-997-2928 extension 1',
-    jose_number: '520-600-6936',
+    ai_number: '520-600-6936',
     hours: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
     units: `
 1 bedroom: starting at eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: starting at fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: starting at eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is Jose, the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy Jose, el asistente de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -44,15 +44,15 @@ const PROPERTIES = {
     address: '1414 North 34th Street, Phoenix Arizona',
     area: 'East Phoenix',
     phone: '602-997-2928 extension 2',
-    jose_number: '520-800-0759',
+    ai_number: '520-800-0759',
     hours: 'Monday through Friday, 10 AM to 5 PM. Closed on weekends',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
     units: `
 1 bedroom: starting at eleven hundred dollars per month.
 2 bedroom: starting at fifteen hundred dollars per month.
 3 bedroom: starting at eighteen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. This is Jose, the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy Jose, el asistente de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
+    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
   }
 };
 
@@ -69,7 +69,7 @@ const sessions = new Map();
 // SYSTEM PROMPT BUILDER (aligned with chat widget voice and rules)
 // ============================================================
 function buildSystemPrompt(property) {
-  return `You are Jose, the AI assistant for Mattgab Management. You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same Jose identity carries across chat, phone, and text. Use first-person "I" throughout.
+  return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout.
 
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
@@ -171,7 +171,7 @@ RULES
 - NEVER state availability dates.
 - NEVER ask what time or day works for a tour. The caller picks from the Calendly link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
-- Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me, Jose, anytime at ${property.jose_number}.
+- Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me anytime at ${property.ai_number}.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with: "Feel free to call or text this number anytime if you have questions. We are here to help."
 
