@@ -202,6 +202,59 @@ async function sendSms(to, fromNumber, body) {
 }
 
 // ============================================================
+// !!! DO NOT REMOVE — POST LEAD TO DASHBOARD !!!
+// ============================================================
+// Fires once per call. Posts to /lead-api.php so the call lands in
+// wp_paa_leads as a source=twilio_voice lead. This is what powers:
+//   - Mattgab dashboard "AI Voice" channel counts
+//   - Mailchimp Welcome Journey trigger (every Twilio call needs to
+//     create a wp_paa_leads row so the journey can fire)
+//   - Twilio Studio New Lead Welcome SMS flow
+//
+// THIS FUNCTION WAS ACCIDENTALLY DELETED ON 2026-05-01 22:37, which
+// silently broke voice → lead capture for ~6 days. Do not delete it
+// again. If you must change it, update the matching call sites in
+// the websocket "stop" handler and "close" handler below.
+// ============================================================
+async function postLeadToDashboard(session) {
+  if (!session || !session.from || session.leadPosted) return;
+  session.leadPosted = true;
+
+  const lines = session.conversation
+    .filter(m => m.role !== 'system')
+    .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+    .join('\n');
+
+  const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
+  const callerName = nameMatch ? nameMatch[1] : '';
+
+  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
+
+  try {
+    const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source:   'twilio_voice',
+        property: session.property?.key || '',
+        name:     callerName,
+        phone:    session.from,
+        summary,
+        status:   'new',
+      }),
+    });
+    const out = await res.json();
+    if (out && out.success) {
+      console.log(`Lead posted: id=${out.id} caller=${callerName || 'unnamed'} from=${session.from}`);
+    } else {
+      console.error('Lead POST non-success:', JSON.stringify(out));
+    }
+  } catch (err) {
+    console.error('Lead POST error:', err.message);
+  }
+}
+
+// ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
 function detectSmsIntent(text) {
@@ -390,6 +443,8 @@ End of transcript
             console.log('\n========== CALL TRANSCRIPT ==========');
             console.log(transcript);
             console.log('=====================================\n');
+            // !!! DO NOT REMOVE — see postLeadToDashboard above for context !!!
+            await postLeadToDashboard(session);
           }
           sessions.delete(ws.callSid);
           break;
@@ -409,6 +464,8 @@ End of transcript
           console.log('\n========== CALL TRANSCRIPT (connection closed) ==========');
           console.log(lines);
           console.log('==========================================================\n');
+          // !!! DO NOT REMOVE — fires lead post if the stop event was missed !!!
+          postLeadToDashboard(session).catch(e => console.error('Lead post error:', e.message));
         }
         sessions.delete(ws.callSid);
       }
