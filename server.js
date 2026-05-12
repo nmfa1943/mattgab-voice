@@ -17,6 +17,50 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 const twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
 
 // ============================================================
+// LIVE TRANSFER TO OFFICE — Task #100
+// ============================================================
+// When the AI detects "speak to a person" intent during office hours,
+// it emits a [[TRANSFER_TO_OFFICE]] token. The server sees the token,
+// checks Phoenix-local office hours, and updates the live call with
+// new TwiML containing <Dial> to the office. If the office doesn't
+// answer in 20 seconds, the call returns to /voice-after-dial which
+// hands the caller back to the AI gracefully.
+//
+// Hours (Arizona, no DST, UTC-7 year round):
+//   Mon-Fri 9am to 6pm
+//   Sat     10am to 4pm
+//   Sun     closed
+// ============================================================
+const OFFICE_PHONE = '+16029972928';
+const TRANSFER_FALLBACK_URL = 'https://mattgab-voice-production.up.railway.app/voice-after-dial';
+
+function isOfficeOpen() {
+  const phx = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' }));
+  const day = phx.getDay();             // 0 = Sun, 6 = Sat
+  const hour = phx.getHours() + phx.getMinutes() / 60;
+  if (day === 0) return false;          // Sunday closed
+  if (day === 6) return hour >= 10 && hour < 16;  // Sat 10 to 4
+  return hour >= 9 && hour < 18;        // Mon-Fri 9 to 6
+}
+
+async function transferCallToOffice(callSid) {
+  try {
+    const twiml = `<Response>
+  <Say voice="alice">One moment, connecting you to our office now.</Say>
+  <Dial timeout="20" action="${TRANSFER_FALLBACK_URL}" method="POST">
+    <Number>${OFFICE_PHONE}</Number>
+  </Dial>
+</Response>`;
+    await twilioClient.calls(callSid).update({ twiml });
+    console.log(`Transfer initiated: callSid=${callSid} -> ${OFFICE_PHONE}`);
+    return true;
+  } catch (err) {
+    console.error(`Transfer failed for ${callSid}:`, err.message);
+    return false;
+  }
+}
+
+// ============================================================
 // PROPERTY DATA — sourced from chat widget prompt (class-chat-widget.php)
 // ============================================================
 const PROPERTIES = {
@@ -164,9 +208,16 @@ If the caller says they want to "reschedule," "change my tour," "move my appoint
 "For tour changes our team handles that directly. Please call our office at ${property.phone}. They can look up your booking and reschedule on the spot. Our hours are ${property.hours}."
 Then close warmly with: "Feel free to call or text this number anytime if you have other questions. We are here to help."
 
-If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
-"Of course. You can reach our office at ${property.phone}. Our hours are ${property.hours}. Is there anything else I can help you with in the meantime?"
-If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
+If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one.
+
+Respond warmly and briefly. In English:
+"Of course, one moment please. I am connecting you to our office now."
+In Spanish:
+"Un momento por favor, lo estoy conectando con nuestra oficina ahora."
+
+Then at the very end of your response, on its own line, emit exactly this token: [[TRANSFER_TO_OFFICE]]
+
+The system uses this token to ring our office line during business hours. Do not say the token aloud; it is for the system. If the office is closed, the system will not transfer and the caller will just hear the warm phrase above. The system handles the hours check; you do not need to.
 
 ============================================================
 LANGUAGE RULES
@@ -231,6 +282,33 @@ async function sendSms(to, fromNumber, body) {
 // again. If you must change it, update the matching call sites in
 // the websocket "stop" handler and "close" handler below.
 // ============================================================
+
+// Name-extraction stopword list. The original regex captured the first
+// word after "I'm" / "I am" / "this is", which matched verbs like
+// "trying," "not," "doing" when callers said "I'm trying to find an
+// apartment." These are NOT names. Reject them.
+const NAME_STOPWORDS = new Set([
+  'trying','not','doing','calling','looking','hoping','working','going',
+  'wondering','interested','seeing','asking','planning','thinking','seeking',
+  'about','here','there','just','still','okay','ok','sorry','really','very',
+  'maybe','probably','actually','definitely','only','also','always','never',
+  'hi','hello','hey','yes','no','um','uh','well','and','but','or','so',
+  'in','on','at','for','from','with','the','a','an','my','your',
+  'good','great','fine','sure'
+]);
+
+function extractCallerName(lines) {
+  // Trigger phrases match case-insensitive, but the captured candidate
+  // must start with a capital letter (proper noun) for the case-sensitive
+  // capture group to bind. Then we still validate against stopwords in
+  // case someone wrote "I am Trying" with an autocapitalized first letter.
+  const m = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]{1,19})/);
+  if (!m) return '';
+  const candidate = m[1];
+  if (NAME_STOPWORDS.has(candidate.toLowerCase())) return '';
+  return candidate;
+}
+
 async function postLeadToDashboard(session) {
   if (!session || !session.from || session.leadPosted) return;
   session.leadPosted = true;
@@ -240,8 +318,7 @@ async function postLeadToDashboard(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
-  const callerName = nameMatch ? nameMatch[1] : '';
+  const callerName = extractCallerName(lines);
 
   const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
 
@@ -308,6 +385,46 @@ fastify.post('/voice', async (request, reply) => {
     <ConversationRelay
       url="wss://mattgab-voice-production.up.railway.app/ws"
       welcomeGreeting="${greeting}"
+      voice="Lrd8QHYUxHOQgV6Kbgy4"
+      ttsProvider="ElevenLabs"
+      language="en-US"
+      transcriptionLanguage="multi"
+      dtmfDetection="true"
+    >
+    </ConversationRelay>
+  </Connect>
+</Response>`);
+});
+
+// ============================================================
+// LIVE TRANSFER FALLBACK ROUTE — Task #100
+// ============================================================
+// Hit by Twilio after the <Dial> verb in transferCallToOffice() either
+// completes or times out. If the office answered and the call went well,
+// hang up cleanly. Otherwise reconnect the caller to the AI so we don't
+// drop them into dead air.
+// ============================================================
+fastify.post('/voice-after-dial', async (request, reply) => {
+  const dialStatus = request.body?.DialCallStatus || '';
+  const dialDuration = parseInt(request.body?.DialCallDuration || '0', 10);
+  console.log(`Voice-after-dial: status=${dialStatus} duration=${dialDuration}s`);
+
+  // Office answered and the call completed normally
+  if (dialStatus === 'completed' && dialDuration > 0) {
+    reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Hangup/>
+</Response>`);
+    return;
+  }
+
+  // No-answer / busy / failed — hand back to AI with a graceful message
+  reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <ConversationRelay
+      url="wss://mattgab-voice-production.up.railway.app/ws"
+      welcomeGreeting="It looks like our office didn't pick up. I can text you a callback number or take a message. Which would you prefer?"
       voice="Lrd8QHYUxHOQgV6Kbgy4"
       ttsProvider="ElevenLabs"
       language="en-US"
@@ -397,8 +514,27 @@ fastify.register(async function(fastify) {
 
             stream.on('finalMessage', async () => {
               ws.send(JSON.stringify({ type: 'text', token: '', last: true }));
-              session.conversation.push({ role: 'assistant', content: fullResponse });
-              console.log(`AI said: ${fullResponse}`);
+
+              // ─── Live transfer detection (Task #100) ───
+              // If the AI emitted the [[TRANSFER_TO_OFFICE]] token, strip it
+              // from the conversation history (so it does not show in transcripts
+              // or send back to Claude on the next turn) and execute the transfer
+              // only when the office is open. The "connecting you now" line was
+              // already spoken to the caller before this point.
+              let savedContent = fullResponse;
+              if (fullResponse.includes('[[TRANSFER_TO_OFFICE]]')) {
+                savedContent = fullResponse.replace(/\[\[TRANSFER_TO_OFFICE\]\]/g, '').trim();
+                if (isOfficeOpen()) {
+                  console.log(`Transfer intent during office hours — initiating for ${session.callSid}`);
+                  // 2-second delay so the caller hears "connecting you" before TwiML swap
+                  setTimeout(() => transferCallToOffice(session.callSid), 2000);
+                } else {
+                  console.log(`Transfer intent OUTSIDE office hours — not executing (${session.callSid})`);
+                }
+              }
+
+              session.conversation.push({ role: 'assistant', content: savedContent });
+              console.log(`AI said: ${savedContent}`);
 
               // Detect and send SMS links (tour checked FIRST)
               const intent = detectSmsIntent(fullResponse);
@@ -439,8 +575,8 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
-            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
-            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
+            const extracted = extractCallerName(lines);
+            const callerName = extracted || 'Unknown';
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
 
             const transcript = `
