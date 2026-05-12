@@ -231,33 +231,6 @@ async function sendSms(to, fromNumber, body) {
 // again. If you must change it, update the matching call sites in
 // the websocket "stop" handler and "close" handler below.
 // ============================================================
-
-// Name-extraction stopword list. The original regex captured the first
-// word after "I'm" / "I am" / "this is", which matched verbs like
-// "trying," "not," "doing" when callers said "I'm trying to find an
-// apartment." These are NOT names. Reject them.
-const NAME_STOPWORDS = new Set([
-  'trying','not','doing','calling','looking','hoping','working','going',
-  'wondering','interested','seeing','asking','planning','thinking','seeking',
-  'about','here','there','just','still','okay','ok','sorry','really','very',
-  'maybe','probably','actually','definitely','only','also','always','never',
-  'hi','hello','hey','yes','no','um','uh','well','and','but','or','so',
-  'in','on','at','for','from','with','the','a','an','my','your',
-  'good','great','fine','sure'
-]);
-
-function extractCallerName(lines) {
-  // Trigger phrases match case-insensitive, but the captured candidate
-  // must start with a capital letter (proper noun) for the case-sensitive
-  // capture group to bind. Then we still validate against stopwords in
-  // case someone wrote "I am Trying" with an autocapitalized first letter.
-  const m = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]{1,19})/);
-  if (!m) return '';
-  const candidate = m[1];
-  if (NAME_STOPWORDS.has(candidate.toLowerCase())) return '';
-  return candidate;
-}
-
 async function postLeadToDashboard(session) {
   if (!session || !session.from || session.leadPosted) return;
   session.leadPosted = true;
@@ -267,7 +240,8 @@ async function postLeadToDashboard(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  const callerName = extractCallerName(lines);
+  const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
+  const callerName = nameMatch ? nameMatch[1] : '';
 
   const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
 
@@ -465,8 +439,8 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
-            const extracted = extractCallerName(lines);
-            const callerName = extracted || 'Unknown';
+            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
+            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
 
             const transcript = `
