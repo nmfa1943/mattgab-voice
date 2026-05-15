@@ -176,6 +176,7 @@ LANGUAGE RULES
 - A single Spanish-sounding word or name does NOT trigger a language switch.
 - Do NOT switch on names like "Jenea", "Jose", "Maria", or similar.
 - If you are unsure whether the caller is speaking Spanish, ask in English first: "Would you prefer to continue in Spanish?"
+- MID-CALL SWITCHING: If the caller switches language mid-conversation (English to Spanish or Spanish to English), switch with them on your very next response and stay in the new language for the rest of the call. Watch for full Spanish phrases like "¿en qué parte está el apartamento?", "los bills incluyen", "solo for mí" — those signal a switch. Single Spanish words still do not switch.
 
 ============================================================
 RULES
@@ -187,6 +188,8 @@ RULES
 - NEVER ask what time or day works for a tour. The caller picks from the Calendly link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
 - Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me anytime at ${property.ai_number}.
+- NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
+- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Felipa or Stephany routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are Monday through Friday, nine AM to six PM, and Saturday, ten AM to four PM." Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are Monday through Friday, ten AM to five PM. Closed on weekends." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is no longer on the call tree; say "Yanelia is not on our office line right now, but you can reach the team at six oh two, nine nine seven, two nine two eight and they'll take a message." For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with: "Feel free to call or text this number anytime if you have questions. We are here to help."
 
@@ -217,6 +220,75 @@ async function sendSms(to, fromNumber, body) {
 }
 
 // ============================================================
+// EXTRACT CALLER NAME — robust against bare-name replies.
+//
+// Bug fixed 2026-05-13: the prior regex only matched "my name is X",
+// "I'm X", "I am X", or "this is X". When a caller replied to "May I
+// get your name?" with just the bare name ("Rubén.", "Alejandro.",
+// "Marcus.", "Juanita Carranza."), the regex missed entirely and the
+// lead record landed with name="". Five of nine voice calls on May 12
+// were silently dropping the captured name this way.
+//
+// This helper walks the conversation, finds the AI's name-asking turn
+// in English or Spanish, captures the caller's next reply, strips
+// intro phrases ("my name is X"), and validates against a junk list
+// so filler words like "calling", "interested", or "looking for
+// something" never land in the name column. Multi-word names
+// ("Juanita Carranza") and accented characters ("Rubén") are
+// preserved.
+// ============================================================
+function extractCallerName(session) {
+  if (!session || !session.conversation) return '';
+  const convo = session.conversation;
+
+  // AI's name-asking phrasings, English + Spanish
+  const askPattern = /(may i (get|have|ask) your name|what(?:'s| is) your name|your name please|may i ask who is calling|¿cuál es tu nombre|¿puedo (obtener|saber) tu nombre|¿me puedes decir tu nombre|¿con quién tengo el gusto)/i;
+
+  // Strip common name-intro phrases so "My name is Claudette" reduces to "Claudette".
+  const stripIntro = (s) => String(s).trim().replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '').trim();
+
+  // Walk turns. After each AI ask, grab the next caller turn and try to validate.
+  for (let i = 0; i < convo.length - 1; i++) {
+    const m = convo[i];
+    if (m.role !== 'assistant') continue;
+    if (!askPattern.test(m.content || '')) continue;
+    for (let j = i + 1; j < convo.length; j++) {
+      if (convo[j].role === 'user') {
+        const candidate = stripIntro((convo[j].content || '').trim());
+        if (isValidName_(candidate)) return cleanName_(candidate);
+        break; // move on; try the next AI ask
+      }
+    }
+  }
+
+  // Fallback to the legacy "my name is X" pattern, with multi-word + accent support
+  const lines = convo
+    .filter(m => m.role !== 'system')
+    .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+    .join('\n');
+  const intro = lines.match(/CALLER:[^\n]*?(?:my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
+  if (intro && isValidName_(intro[1])) return cleanName_(intro[1]);
+
+  return '';
+}
+
+function isValidName_(s) {
+  if (!s) return false;
+  const t = String(s).trim().replace(/[.,!?]+$/, '').trim();
+  if (t.length < 2 || t.length > 50) return false;
+  const junk = /^(calling|interested|looking|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope)\b/i;
+  if (junk.test(t)) return false;
+  if (/\?/.test(t)) return false;
+  if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)\b/i.test(t)) return false;
+  if (t.split(/\s+/).length > 4) return false;
+  return true;
+}
+
+function cleanName_(s) {
+  return String(s).trim().replace(/[.,!?]+$/, '').trim();
+}
+
+// ============================================================
 // !!! DO NOT REMOVE — POST LEAD TO DASHBOARD !!!
 // ============================================================
 // Fires once per call. Posts to /lead-api.php so the call lands in
@@ -240,8 +312,7 @@ async function postLeadToDashboard(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'?m|i am|this is)\s+([A-Z][a-z]+)/i);
-  const callerName = nameMatch ? nameMatch[1] : '';
+  const callerName = extractCallerName(session);
 
   const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
 
@@ -274,9 +345,15 @@ async function postLeadToDashboard(session) {
 // ============================================================
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
-  const hasSending = /\b(sending|send|texting|right now)\b/.test(lower);
-  if (!hasSending) return null;
-  // TOUR is checked FIRST so "I'll send you the tour link and application link" maps to tour
+  // POST-CONSENT ONLY. We must match the phrase the AI says AFTER the caller agrees,
+  // never the offer phrase. The prompt instructs the AI to say "I am sending you the
+  // [tour/application/portal] link right now" once consent is given. Matching on the
+  // gerund "sending" with a following object ("you the", "it now", "now") avoids the
+  // offer-line false positive ("I would love to SEND you the tour link..."), which is
+  // why links were arriving before the caller said yes.
+  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now)\b/.test(lower);
+  if (!isSendingNow) return null;
+  // TOUR is checked FIRST so "I'm sending you the tour link and application link" maps to tour
   if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
   if (/\b(application|apply)\b/.test(lower)) return 'apply';
   if (/\b(portal|service request|maintenance)\b/.test(lower)) return 'portal';
@@ -302,11 +379,16 @@ fastify.post('/voice', async (request, reply) => {
   const property = PROPERTIES[to];
   const greeting = property ? property.greeting_en : 'Thank you for calling Mattgab Management. How can I help you today?';
 
+  // WS URL uses the same host as the inbound request so staging and production
+  // each connect to their own WebSocket. Avoids cross-environment leakage when
+  // testing on a staging URL.
+  const host = request.headers.host || 'mattgab-voice-production.up.railway.app';
+
   reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <ConversationRelay
-      url="wss://mattgab-voice-production.up.railway.app/ws"
+      url="wss://${host}/ws"
       welcomeGreeting="${greeting}"
       voice="Lrd8QHYUxHOQgV6Kbgy4"
       ttsProvider="ElevenLabs"
@@ -439,8 +521,8 @@ fastify.register(async function(fastify) {
               .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
               .join('\n');
 
-            const nameMatch = lines.match(/CALLER:.*?(?:my name is|i'm|i am|this is)\s+([A-Z][a-z]+)/i);
-            const callerName = nameMatch ? nameMatch[1] : 'Unknown';
+            const extractedName = extractCallerName(session);
+            const callerName = extractedName || 'Unknown';
             const callDate = new Date().toLocaleString('en-US', { timeZone: 'America/Phoenix' });
 
             const transcript = `
