@@ -190,6 +190,7 @@ RULES
 - Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me anytime at ${property.ai_number}.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
 - STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Felipa or Stephany routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are Monday through Friday, nine AM to six PM, and Saturday, ten AM to four PM." Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are Monday through Friday, nine AM to five PM, and Saturday, ten AM to three PM." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is no longer on the call tree; say "Yanelia is not on our office line right now, but you can reach the team at six oh two, nine nine seven, two nine two eight and they'll take a message." For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
+- NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NMFA ext 1): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NMFA ext 1): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A. For Yanelia: Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Felipa, Stephany, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with: "Feel free to call or text this number anytime if you have questions. We are here to help."
 
@@ -245,7 +246,13 @@ function extractCallerName(session) {
   const askPattern = /(may i (get|have|ask) your name|what(?:'s| is) your name|your name please|may i ask who is calling|¿cuál es tu nombre|¿puedo (obtener|saber) tu nombre|¿me puedes decir tu nombre|¿con quién tengo el gusto)/i;
 
   // Strip common name-intro phrases so "My name is Claudette" reduces to "Claudette".
-  const stripIntro = (s) => String(s).trim().replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '').trim();
+  // Also strip leading inverted-Spanish punctuation that speech-to-text sometimes prepends
+  // ("¿Marqués." should be captured as "Marqués", not "¿Marqués"). Bug fix 2026-05-15
+  // after lead 370 landed with name="¿Marqués" (caller was Marcus).
+  const stripIntro = (s) => String(s).trim()
+    .replace(/^[¿¡]+\s*/, '')
+    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '')
+    .trim();
 
   // Walk turns. After each AI ask, grab the next caller turn and try to validate.
   for (let i = 0; i < convo.length - 1; i++) {
@@ -274,18 +281,23 @@ function extractCallerName(session) {
 
 function isValidName_(s) {
   if (!s) return false;
-  const t = String(s).trim().replace(/[.,!?]+$/, '').trim();
+  const t = String(s).trim().replace(/[.,!?¿¡]+$/, '').trim();
   if (t.length < 2 || t.length > 50) return false;
   const junk = /^(calling|interested|looking|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope)\b/i;
   if (junk.test(t)) return false;
-  if (/\?/.test(t)) return false;
-  if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)\b/i.test(t)) return false;
+  // Reject any name containing question marks (regular or Spanish inverted).
+  // Speech-to-text occasionally prepends "¿" or appends "?"; either signals
+  // the transcript treated the utterance as a question, not a name.
+  if (/[?¿¡]/.test(t)) return false;
+  // Word boundary \b is ASCII-only in JS, so we explicitly anchor with (\s|$)
+  // to catch accented Spanish question-starters like "qué" and "cómo".
+  if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)(\s|$)/i.test(t)) return false;
   if (t.split(/\s+/).length > 4) return false;
   return true;
 }
 
 function cleanName_(s) {
-  return String(s).trim().replace(/[.,!?]+$/, '').trim();
+  return String(s).trim().replace(/[.,!?¿¡]+$/, '').replace(/^[¿¡]+/, '').trim();
 }
 
 // ============================================================
