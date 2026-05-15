@@ -29,6 +29,7 @@ const PROPERTIES = {
     phone: '602-997-2928 extension 1',
     ai_number: '520-600-6936',
     hours: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
+    hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
     units: `
 1 bedroom: starting at eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
@@ -46,6 +47,7 @@ const PROPERTIES = {
     phone: '602-997-2928 extension 2',
     ai_number: '520-800-0759',
     hours: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
+    hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
     units: `
 1 bedroom: starting at eleven hundred dollars per month.
@@ -384,6 +386,61 @@ function detectSmsIntent(text) {
 }
 
 // ============================================================
+// PRE-LLM FACTUAL INTENT DETECTOR
+//
+// Some factual questions ("what are your hours?") must be answered
+// deterministically. Haiku has been observed hallucinating prior
+// hours strings ("10 AM to 5 PM, closed on weekends") even when
+// the system prompt explicitly forbids that paraphrase and pins
+// the canonical string. Routing these questions through a fixed
+// template eliminates the LLM lottery for high-stakes facts and
+// produces a shorter, less repetitive response in the bargain.
+//
+// Only returns an intent if the question is unambiguous and is
+// NOT scoped to a specific staff member (which the LLM still
+// handles through STAFF-TO-EXTENSION MAPPING).
+// ============================================================
+function detectFactualIntent(text) {
+  if (!text) return null;
+  const t = text.toLowerCase().trim();
+
+  // If the caller named a staff member, defer to the LLM so it can
+  // give per-person extension + hours from the routing rule.
+  if (/\b(felipa|stephany|stephanie|stefanie|estefani|salipa|filipa|felipe|falipa|angel|anjel|angie|angela|jose|jos[eé]|joseph|yanelia|yenelia|janelia|daniela)\b/i.test(t)) {
+    return null;
+  }
+
+  // English hours questions — keep the regex tight to avoid false positives.
+  const isHoursEN =
+    /\b(what (are )?(your|the) (office )?hours)\b/.test(t) ||
+    /\bwhen (are you|do you|are the office|does the office) (open|opening|close|closing)\b/.test(t) ||
+    /\bare you open (on |today|saturday|sunday|the weekend|weekends)\b/.test(t) ||
+    /^\s*(office )?hours\??\s*$/.test(t) ||
+    /\bwhat (time|day)s? .{0,30}(open|opening|close|closing)\b/.test(t);
+
+  // Spanish hours questions.
+  const isHoursES =
+    /\b(cu[aá]l es (el|su) horario|qu[eé] horarios|a qu[eé] hora (abren|cierran|est[aá]n abiertos))\b/.test(t) ||
+    /\b(est[aá]n abiertos? (los|el) (s[aá]bado|domingo|fin de semana))\b/.test(t);
+
+  if (isHoursEN || isHoursES) return 'hours';
+  return null;
+}
+
+// Build a concise, deterministic reply for a factual intent.
+// Two sentences max: one fact, one short next step.
+function buildFactualReply(intent, property, isSpanish) {
+  if (intent === 'hours') {
+    if (isSpanish) {
+      const esHours = property.hours_es || property.hours;
+      return `El horario de la oficina es ${esHours}. ¿Quieres que te envíe el enlace para reservar un recorrido?`;
+    }
+    return `Our office hours are ${property.hours}. Would you like me to send you the tour link?`;
+  }
+  return null;
+}
+
+// ============================================================
 // FASTIFY SERVER
 // ============================================================
 const fastify = Fastify({ logger: true });
@@ -485,6 +542,22 @@ fastify.register(async function(fastify) {
           }
 
           session.conversation.push({ role: 'user', content: text });
+
+          // PRE-LLM INTERCEPT for hard-to-LLM factual questions (hours).
+          // Skip the Claude round-trip and answer with the canonical string.
+          // Haiku has been observed hallucinating prior-version hours strings
+          // ("10 AM to 5 PM, closed on weekends") despite explicit prompt rules
+          // forbidding it. This guarantees correctness for high-stakes facts.
+          const factualIntent = detectFactualIntent(text);
+          if (factualIntent) {
+            const reply = buildFactualReply(factualIntent, session.property, session.isSpanish);
+            if (reply) {
+              console.log(`Factual intent intercepted: ${factualIntent} → ${reply}`);
+              ws.send(JSON.stringify({ type: 'text', token: reply, last: true }));
+              session.conversation.push({ role: 'assistant', content: reply });
+              break;
+            }
+          }
 
           try {
             let fullResponse = '';
