@@ -314,6 +314,77 @@ function cleanName_(s) {
 }
 
 // ============================================================
+// GENERATE CALL SUMMARY + ACTION RECOMMENDATION
+// ============================================================
+// At end-of-call, we ask Claude Haiku to produce two things:
+//   1. ai_summary: 2-3 sentence recap of what the caller wanted, what was
+//      discussed, and what was committed. Written for the leasing agent.
+//   2. ai_action: one-line recommendation for what the human agent should
+//      do next ("Send tour link", "Call back to confirm tour for Saturday",
+//      "Add to waitlist for 2BR", "No follow-up needed — caller declined").
+//
+// We use Claude (not a template) here because the call content is open-ended
+// and the value comes from the LLM understanding what the caller actually
+// wanted. The hours-question case from earlier today does NOT apply: this
+// is an after-the-fact summary, not a live caller-facing answer, so the
+// LLM-lottery risk is low and the worst case is a slightly imperfect recap.
+//
+// Returns { ai_summary, ai_action } on success, or empty strings on error.
+// Failure is non-fatal — the lead still posts without the AI fields.
+// ============================================================
+async function generateCallSummary(session) {
+  if (!session || !session.conversation) return { ai_summary: '', ai_action: '' };
+
+  // Build a clean transcript for the summarizer prompt. Filter out the
+  // system prompt and cap length so we don't blow up token budget.
+  const transcript = session.conversation
+    .filter(m => m.role !== 'system')
+    .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
+    .join('\n')
+    .substring(0, 6000);
+
+  if (!transcript.trim()) return { ai_summary: '', ai_action: '' };
+
+  const callerName = extractCallerName(session) || 'Unknown caller';
+  const propertyName = session.property?.short || 'property';
+
+  const prompt = `You are reviewing a voice call transcript for a leasing agent at Mattgab Management. Produce a JSON object with exactly two keys: "summary" and "action".
+
+"summary" must be 2 to 3 sentences. Cover: who called, what they wanted, what was discussed (price, tour, application, hours, etc.), and any commitment made (tour link sent, application link sent, callback expected). Be specific. Use the caller's name if known. Do not include filler.
+
+"action" must be ONE short sentence describing what the human leasing agent should do next. Examples: "Send tour link via text", "Follow up tomorrow to confirm tour booking", "Add to waitlist for 2 bedroom", "No follow-up needed — caller declined", "Verify Section 8 voucher status before tour", "Confirm move-in date and start application".
+
+If the call was a wrong number, a hang-up, or had no real intent, set summary to "Brief call with no clear leasing intent" and action to "No follow-up needed".
+
+Caller: ${callerName}
+Property: ${propertyName}
+
+TRANSCRIPT:
+${transcript}
+
+Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summary":"...","action":"..."}`;
+
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }],
+    });
+    const raw = (msg.content?.[0]?.text || '').trim();
+    // Strip code-fence wrapper if Haiku adds one despite the instruction
+    const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+    const parsed = JSON.parse(clean);
+    return {
+      ai_summary: String(parsed.summary || '').trim().substring(0, 1000),
+      ai_action:  String(parsed.action  || '').trim().substring(0, 240),
+    };
+  } catch (err) {
+    console.error('Call summary generation failed:', err.message);
+    return { ai_summary: '', ai_action: '' };
+  }
+}
+
+// ============================================================
 // !!! DO NOT REMOVE — POST LEAD TO DASHBOARD !!!
 // ============================================================
 // Fires once per call. Posts to /lead-api.php so the call lands in
@@ -341,6 +412,13 @@ async function postLeadToDashboard(session) {
 
   const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
 
+  // Generate the AI summary + action in parallel-ish with the network call.
+  // Awaiting here adds ~1-2s to the post-call writeback, which is fine
+  // because nothing is blocked on it (caller already hung up).
+  const { ai_summary, ai_action } = await generateCallSummary(session);
+  if (ai_summary) console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
+  if (ai_action)  console.log(`Call action: ${ai_action}`);
+
   try {
     const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
       method: 'POST',
@@ -352,6 +430,8 @@ async function postLeadToDashboard(session) {
         phone:    session.from,
         summary,
         status:   'new',
+        ai_summary,
+        ai_action,
       }),
     });
     const out = await res.json();
