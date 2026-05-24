@@ -35,8 +35,8 @@ const PROPERTIES = {
 1 bedroom: starting at eleven hundred dollars per month. 650 square feet, 1 bed, 1 bath.
 2 bedroom: starting at fifteen hundred dollars per month. 880 square feet, 2 bed, 1 and a half baths.
 3 bedroom: starting at eighteen hundred dollars per month. 1080 square feet, 3 bed, 2 baths.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. We have a five hundred dollar move-in credit available right now while units last. May I get your name?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. Tenemos un crédito de mudanza de quinientos dólares disponible por tiempo limitado. ¿Me puedes decir tu nombre?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -53,8 +53,8 @@ const PROPERTIES = {
 1 bedroom: starting at eleven hundred dollars per month.
 2 bedroom: starting at fifteen hundred dollars per month.
 3 bedroom: starting at eighteen hundred dollars per month.`,
-    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. Estoy aqui para ayudarle. Como le puedo ayudar hoy?"
+    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. We have a five hundred dollar move-in credit available right now while units last. May I get your name?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. Tenemos un crédito de mudanza de quinientos dólares disponible por tiempo limitado. ¿Me puedes decir tu nombre?"
   }
 };
 
@@ -134,7 +134,10 @@ LEASING FLOW:
 - Urgency: "We can arrange a showing any time, including weekends."
 - NEVER end the call abruptly. Always offer the tour link before saying goodbye if it has not been sent.
 
-CLOSING — before ending every call say: "Feel free to call or text this number anytime if you have questions. We are here to help."
+CLOSING — before ending every call say EXACTLY this template, no variants:
+- English: "Looking forward to meeting you, [Name]. Reach out anytime if anything comes up, by call or text. I am here whenever you need me." If the caller never gave a name, drop the name token but keep the rest.
+- Spanish: "Estoy emocionado de conocerte, [Nombre]. Llama o escribe cuando quieras. Aquí estoy para ayudarte." If the caller never gave a name, drop the name token but keep the rest.
+- DO NOT say "Take care", "Thanks for choosing Mattgab Management", "Que tengas un excelente día", or "Feel free to call or text this number anytime". Those phrasings are deprecated as of May 21, 2026 and must not appear in a closing turn.
 
 ============================================================
 SMS CONSENT RULE — REQUIRED
@@ -164,7 +167,7 @@ ESCALATION — RESCHEDULE OR HUMAN REQUEST
 
 If the caller says they want to "reschedule," "change my tour," "move my appointment," "cancel my tour," "I already have a tour," "I have a tour booked," or anything that signals an EXISTING booking, do NOT try to qualify them again and do NOT ask for their name. You do not have access to the booking system. On the SAME turn, route them to the office:
 "For tour changes our team handles that directly. Please call our office at ${property.phone}. They can look up your booking and reschedule on the spot. Our hours are ${property.hours}."
-Then close warmly with: "Feel free to call or text this number anytime if you have other questions. We are here to help."
+Then close with the CLOSING template above (English or Spanish per call language). Do not use the deprecated "Feel free to call or text this number anytime" wording.
 
 If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
 "Of course. You can reach our office at ${property.phone}. Our hours are ${property.hours}. Is there anything else I can help you with in the meantime?"
@@ -296,8 +299,14 @@ function isValidName_(s) {
   if (!s) return false;
   const t = String(s).trim().replace(/[.,!?¿¡]+$/, '').trim();
   if (t.length < 2 || t.length > 50) return false;
-  const junk = /^(calling|interested|looking|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope)\b/i;
+  // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
+  // landing with junk names. New rejections cover transfer-intent,
+  // resident-status, vendor, and Spanish recovery phrases.
+  const junk = /^(calling|interested|looking|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
   if (junk.test(t)) return false;
+  // Reject unit-code patterns like "D12", "A11", "C24" — those are unit
+  // tags from current residents, not caller names.
+  if (/^[a-z]\s?\d{1,3}$/i.test(t)) return false;
   // Reject any name containing question marks (regular or Spanish inverted).
   // Speech-to-text occasionally prepends "¿" or appends "?"; either signals
   // the transcript treated the utterance as a question, not a name.
