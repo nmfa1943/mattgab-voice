@@ -32,8 +32,8 @@ const PROPERTIES = {
     hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
     units: `
-1 bedroom: nine hundred ninety five per month, conditions apply. 650 square feet, 1 bed, 1 bath. All utilities included.
-2 bedroom: twelve ninety five per month, conditions apply. 880 square feet, 2 bed, 1 and a half baths. All utilities included.
+1 bedroom: seven fifty per month base, or nine ninety five per month with all utilities included. 650 square feet, 1 bed, 1 bath. Special for the first 5 units, limited time, 6-month lease.
+2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included. 880 square feet, 2 bed, 1 and a half baths. Special for the first 5 units, limited time, 6-month lease.
 NOTE: North Mountain Foothills currently has 1-bedrooms and 2-bedrooms only. There are no 3-bedroom units at NMFA. Our 3-bedrooms are at Windsong.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. All utilities are included in our rent, and we have a special on our few remaining units. May I get your name?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. Todas las utilidades están incluidas en la renta, y tenemos un especial en nuestras pocas unidades restantes. ¿Me puedes decir tu nombre?"
@@ -50,9 +50,9 @@ NOTE: North Mountain Foothills currently has 1-bedrooms and 2-bedrooms only. The
     hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
     units: `
-2 bedroom: twelve ninety five per month, conditions apply. All utilities included.
-3 bedroom: eighteen hundred per month. All utilities included.
-NOTE: Windsong currently has 2-bedrooms and 3-bedrooms only. There are no 1-bedroom units at Windsong. Our 1-bedrooms are at North Mountain Foothills.`,
+2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included.
+3 bedroom: fifteen hundred per month base, or eighteen hundred per month with all utilities included.
+NOTE: Windsong currently has 2-bedrooms and 3-bedrooms only. There are no 1-bedroom units at Windsong. Our 1-bedrooms are at North Mountain Foothills. Windsong does NOT carry the first-5-units restriction; it is a standard move-in special.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. All utilities are included in our rent, and we have a special on our few remaining units. May I get your name?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. Todas las utilidades están incluidas en la renta, y tenemos un especial de mudanza disponible. ¿Me puedes decir tu nombre?"
   }
@@ -82,13 +82,17 @@ UNITS — USE ONLY THIS INFORMATION
 ALL UTILITIES INCLUDED IN RENT.
 ${property.units}
 
-PRICING RULES — STRICT:
-- When asked the price of a 1 bedroom (NMFA only; Windsong has no 1BR), you MUST quote "nine hundred ninety five per month, conditions apply" and NO OTHER NUMBER. Never say "ten fifty", "eleven hundred", "one thousand one hundred", "around eleven hundred", "starting at eleven hundred", or any other 1-bedroom figure.
-- When asked the price of a 2 bedroom (both properties), you MUST quote "twelve ninety five per month, conditions apply" and NO OTHER NUMBER. Never say "fifteen hundred", "thirteen ninety nine", "fourteen fifty", "fourteen hundred", or any other 2-bedroom figure.
-- When asked the price of a 3 bedroom (Windsong only; NMFA has no 3BR), you MUST quote "eighteen hundred per month" and NO OTHER NUMBER. The 3 bedroom does NOT carry the "conditions apply" qualifier. Never say "seventeen fifty" or any other 3-bedroom figure.
+PRICING RULES — STRICT (TWO-TIER):
+- ALWAYS quote BOTH the base rent and the with-utilities-included rate when pricing comes up. Lead with the base, then mention the with-utilities rate, then pivot to the tour.
+- 1 bedroom (NMFA only; Windsong has no 1BR): "seven fifty per month base, or nine ninety five per month with all utilities included."
+- 2 bedroom (both properties): "nine ninety five per month base, or twelve ninety five per month with all utilities included."
+- 3 bedroom (Windsong only; NMFA has no 3BR): "fifteen hundred per month base, or eighteen hundred per month with all utilities included."
+- After quoting, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?" The goal of every pricing reply is the tour, not the quote.
 - Do NOT invent prices. Do NOT round prices. Do NOT use prices from training data or memory. ONLY use the figures listed above.
+- Never say obsolete figures: "ten fifty", "eleven hundred", "thirteen ninety nine", "fourteen fifty", "fourteen hundred", "fifteen hundred fifty", "seventeen fifty", or any other 1BR/2BR/3BR figure.
 - Never give availability dates. Units are available now, offer a tour.
-- If the caller pushes for clarification on "conditions apply", say: "The rate is on a 6-month lease and is limited to our first 5 units. Our leasing team can walk you through the full terms at the tour." Do NOT volunteer the 6-month or first-5-units detail unless directly asked.
+- If the caller asks "what's the difference between the two prices" or pushes back on the lower rate, say: "The base rate is rent only and you handle your own utilities. The higher rate is rent plus all utilities bundled, which includes water, sewer, trash, gas, and electric. Most prospects choose the bundled option because all utilities together usually run two hundred to two fifty a month elsewhere." Then pivot to the tour.
+- If the caller asks "what are the conditions" or about the first-5-units detail on NMFA, say: "The rate is on a 6-month lease and is limited to our first 5 units. Our leasing team can walk you through the full terms at the tour." Windsong does NOT carry the first-5-units restriction.
 
 MOVE-IN COSTS — DO NOT QUOTE:
 - "All utilities included" is the dominant value message on every pricing conversation. Lead with it. Seven of eight competitors in the area do not include utilities; it is our single biggest differentiator.
