@@ -239,7 +239,7 @@ RULES
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
-- Write all prices as full words. Valid figures only: "nine hundred ninety five" or "nine ninety five" (1BR rate), "twelve ninety five" (2BR rate), "eighteen hundred" (3BR rate, Windsong only). NEVER use "ten fifty", "eleven hundred", "thirteen ninety nine", "fourteen fifty", "fifteen hundred", "seventeen fifty", "fourteen hundred", "twelve hundred ninety five", or "sixteen hundred fifty". Those are obsolete prices or move-in totals we no longer quote.
+- Write all prices as full words. Valid figures: "seven fifty" (NMFA 1BR base), "nine ninety five" or "nine hundred ninety five" (NMFA 1BR with utilities OR 2BR base both properties), "twelve ninety five" (2BR with utilities both properties), "fifteen hundred" (Windsong 3BR base), "eighteen hundred" (Windsong 3BR with utilities). NEVER use "ten fifty", "eleven hundred", "thirteen ninety nine", "fourteen fifty", "fourteen hundred", "fifteen hundred fifty", "seventeen fifty", "twelve hundred ninety five", or "sixteen hundred fifty". Those are obsolete prices or move-in totals we no longer quote.
 - Write all numbers as words when speaking about prices.
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
