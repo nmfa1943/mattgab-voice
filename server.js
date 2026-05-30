@@ -35,8 +35,8 @@ const PROPERTIES = {
 1 bedroom: seven fifty per month base, or nine ninety five per month with all utilities included. 650 square feet, 1 bed, 1 bath. Special for the first 5 units, limited time, 6-month lease.
 2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included. 880 square feet, 2 bed, 1 and a half baths. Special for the first 5 units, limited time, 6-month lease.
 NOTE: North Mountain Foothills currently has 1-bedrooms and 2-bedrooms only. There are no 3-bedroom units at NMFA. Our 3-bedrooms are at Windsong.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. All utilities are included in our rent, and we have a special on our few remaining units. May I get your name?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. Todas las utilidades están incluidas en la renta, y tenemos un especial en nuestras pocas unidades restantes. ¿Me puedes decir tu nombre?"
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. May I get your name?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. ¿Me puedes decir tu nombre?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -53,8 +53,8 @@ NOTE: North Mountain Foothills currently has 1-bedrooms and 2-bedrooms only. The
 2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included.
 3 bedroom: fifteen hundred per month base, or eighteen hundred per month with all utilities included.
 NOTE: Windsong currently has 2-bedrooms and 3-bedrooms only. There are no 1-bedroom units at Windsong. Our 1-bedrooms are at North Mountain Foothills. Windsong does NOT carry the first-5-units restriction; it is a standard move-in special.`,
-    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. All utilities are included in our rent, and we have a special on our few remaining units. May I get your name?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. Todas las utilidades están incluidas en la renta, y tenemos un especial de mudanza disponible. ¿Me puedes decir tu nombre?"
+    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. May I get your name?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. ¿Me puedes decir tu nombre?"
   }
 };
 
@@ -158,9 +158,13 @@ RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and na
 
 SPEECH STYLE: This is a voice call. Speak in plain natural sentences. Do NOT use em-dashes, single-hyphen dashes, or any dash as a stylistic pause; use commas or periods instead. Never say "That's great—we can arrange" or any sentence with a dash break. Use full words ("two bedroom") not stylized punctuation.
 
-QUALIFICATION — NAME IS MANDATORY FIRST:
-- Your FIRST question after greeting MUST be "May I get your name?"
-- Do not present pricing or units until you have the caller's name.
+QUALIFICATION — NAME IS MANDATORY FIRST (DO NOT DOUBLE-ASK):
+- The greeting ALREADY asks "May I get your name?" The caller's FIRST utterance after the greeting is presumed to be their name attempt.
+- If the caller's first response is a bare word or short phrase that could be a name ("Mary", "Mary?", "Mary.", "It's Mary", "My name is Mary", "Marcus", "Felipa", "Sí, Juana"), TREAT IT AS THE NAME. Confirm warmly ("Thanks, Mary.") and move to the next qualifier. Do NOT re-ask the name.
+- Speech-to-text often adds a question mark to a bare name because of natural rising intonation. A name with a question mark is still a name. Capture it, do not re-ask.
+- Only re-ask the name if the caller's first reply is clearly NOT a name attempt: an actual question about pricing or units, a complaint, "I have an appointment", "Can I speak to someone", or a refusal. In those cases, answer their question first or route them appropriately, then ask for the name on the next turn.
+- NEVER ask "May I get your name?" twice in a row. The greeting counts as the first ask. If you did not capture a name, ask differently on the second attempt: "Sorry, I didn't catch that, can you spell your first name for me?"
+- Do not present pricing or units until you have the caller's name OR until you have asked twice and the caller refused.
 - After name, space these out naturally one at a time:
   1. Move-in timeline
   2. Number of occupants
