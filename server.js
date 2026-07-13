@@ -149,7 +149,7 @@ SECTION 8 AND HOME INC:
 ============================================================
 CONVERSATION PRINCIPLES
 ============================================================
-MEMORY: NEVER re-ask something already answered in this conversation.
+MEMORY: NEVER re-ask something already answered in this conversation. This includes whether the caller is a resident (maintenance) or a prospect (leasing) — once established, do not ask again, even after an interruption or an unclear reply. If a reply seems disconnected from your last question (for example, a stray name or a one-word answer that does not fit), ask the caller to repeat what they said rather than restarting qualification from scratch.
 
 RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and natural.
 
@@ -205,6 +205,8 @@ NO HOT WATER: Check breaker. If unresolved, direct to portal.
 THERMOSTAT: Check mode and batteries. If unresolved, direct to portal.
 WATER LEAK: Turn off supply valve immediately. Direct to portal right away.
 ALL OTHERS: Direct to portal. "Our team will follow up to schedule."
+
+Whenever you direct a non-emergency issue to the portal, proactively offer to text the portal link on that same turn — do not wait for the caller to ask. Say: "Would you like me to text you the portal link so you can submit that easily?" Wait for consent ("yes", "sure", "okay", "please do") before sending. Once consent is given, say: "I am sending you the portal link right now."
 
 ============================================================
 ESCALATION — RESCHEDULE OR HUMAN REQUEST
@@ -268,14 +270,18 @@ PRONUNCIATION RULES — CRITICAL FOR VOICE:
 // ============================================================
 async function sendSms(to, fromNumber, body) {
   try {
-    const params = { to, body };
+    // Always pin the specific property number as sender, even when a Messaging
+    // Service is configured — otherwise Twilio auto-picks from the shared
+    // Sender Pool and can send from the WRONG property's number (e.g. a
+    // Windsong number texting an NMFA caller). Twilio supports specifying
+    // both `from` and `messagingServiceSid` together: `from` pins the sender,
+    // `messagingServiceSid` still applies its A2P throughput/compliance rules.
+    const params = { to, body, from: fromNumber };
     if (TWILIO_MSG_SID) {
       params.messagingServiceSid = TWILIO_MSG_SID;
-    } else {
-      params.from = fromNumber;
     }
     await twilioClient.messages.create(params);
-    console.log(`SMS sent to ${to} via ${TWILIO_MSG_SID ? 'Messaging Service' : 'direct number'}`);
+    console.log(`SMS sent to ${to} from ${fromNumber}${TWILIO_MSG_SID ? ' via Messaging Service' : ''}`);
   } catch (err) {
     console.error('SMS error:', err.message);
   }
@@ -510,6 +516,15 @@ async function postLeadToDashboard(session) {
   }
 }
 
+// SMS CONSENT GATE (A2P 10DLC backstop). Returns true only if the caller's turn
+// is an explicit yes. Refusals win. Better to withhold a link than text without consent.
+function isConsentAffirmative(text) {
+  if (!text) return false;
+  const t = ' ' + text.toLowerCase().replace(/[^\p{L}\s]/gu, ' ').replace(/\s+/g, ' ') + ' ';
+  if (/\b(no|nope|not|don't|do not|stop|later|wait|hold on|nada)\b/.test(t)) return false;
+  return /\b(yes|yeah|yep|yup|sure|ok|okay|okey|please|go ahead|sounds good|that works|works for me|absolutely|definitely|of course|si|sí|claro|dale|por favor|esta bien|está bien|perfecto|adelante)\b/.test(t);
+}
+
 // ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
@@ -652,6 +667,7 @@ fastify.register(async function(fastify) {
             isSpanish: false,
             languageSwitched: false,
             sent: [],
+            activeStream: null,
             conversation: [
               { role: 'system', content: buildSystemPrompt(property) }
             ]
@@ -706,12 +722,14 @@ fastify.register(async function(fastify) {
 
           try {
             let fullResponse = '';
+            let aborted = false;
             const stream = anthropic.messages.stream({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 200,
               system: session.conversation[0].content,
               messages: session.conversation.slice(1),
             });
+            session.activeStream = stream;
 
             stream.on('text', (token) => {
               fullResponse += token;
@@ -719,6 +737,8 @@ fastify.register(async function(fastify) {
             });
 
             stream.on('finalMessage', async () => {
+              if (aborted) return;
+              session.activeStream = null;
               ws.send(JSON.stringify({ type: 'text', token: '', last: true }));
               session.conversation.push({ role: 'assistant', content: fullResponse });
               console.log(`AI said: ${fullResponse}`);
@@ -726,17 +746,51 @@ fastify.register(async function(fastify) {
               // Detect and send SMS links (tour checked FIRST)
               const intent = detectSmsIntent(fullResponse);
               if (intent && !session.sent.includes(intent) && session.from) {
-                session.sent.push(intent);
-                const { property, to, from } = session;
-
-                if (intent === 'tour') {
-                  await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${property.tour_link}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
-                } else if (intent === 'apply') {
-                  await sendSms(from, to, `Here's your application link for ${property.name}:\n${APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
-                } else if (intent === 'portal') {
-                  await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
+                // A2P 10DLC backstop: tour/apply links require an explicit affirmative
+                // on the caller's triggering turn. Portal is resident-requested, not gated.
+                if ((intent === 'tour' || intent === 'apply') && !isConsentAffirmative(text)) {
+                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn: "${(text || '').slice(0, 60)}"`);
+                } else {
+                  session.sent.push(intent);
+                  const { property, to, from } = session;
+                  if (intent === 'tour') {
+                    await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${property.tour_link}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
+                  } else if (intent === 'apply') {
+                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
+                  } else if (intent === 'portal') {
+                    await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
+                  }
                 }
               }
+            });
+
+            // Caller barge-in (ConversationRelay 'interrupt') calls stream.abort()
+            // below. Record only what was actually spoken so history matches what
+            // the caller heard, and skip SMS-intent detection for a cut-off turn —
+            // consistent with "withhold rather than risk an unwanted send."
+            stream.on('abort', () => {
+              aborted = true;
+              session.activeStream = null;
+              if (fullResponse) {
+                session.conversation.push({ role: 'assistant', content: fullResponse + ' [cut off by caller]' });
+                console.log(`AI cut off by interruption: ${fullResponse}`);
+              } else {
+                console.log('AI cut off by interruption before any text was generated');
+              }
+            });
+
+            // Without this handler, an unhandled 'error' event on an EventEmitter
+            // crashes the whole Node process (this is what took staging down
+            // earlier today on a malformed ANTHROPIC_KEY) — every active call
+            // would drop, not just this one. Always keep a listener here.
+            stream.on('error', (error) => {
+              if (aborted) return;
+              session.activeStream = null;
+              console.error('Claude stream error:', error.message);
+              const fallback = session.isSpanish
+                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
+                : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
+              ws.send(JSON.stringify({ type: 'text', token: fallback, last: true }));
             });
 
           } catch (err) {
@@ -750,7 +804,11 @@ fastify.register(async function(fastify) {
         }
 
         case 'interrupt': {
+          const interruptedSession = sessions.get(ws.callSid);
           console.log('Caller interrupted');
+          if (interruptedSession && interruptedSession.activeStream) {
+            interruptedSession.activeStream.abort();
+          }
           break;
         }
 
