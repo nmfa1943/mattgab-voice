@@ -62,6 +62,134 @@ const TENANT_PORTAL          = 'https://apexm.twa.rentmanager.com';
 const MAINTENANCE_EMERGENCY  = '602-997-2928 extension 3';
 
 // ============================================================
+// MARKETING CONTENT STORE (prices / hours / specials)
+// ------------------------------------------------------------
+// Pricing, hours, and the units summary are no longer hardcoded in the
+// prompt. They are fetched from ONE canonical record (content-api.php on
+// the dashboard host) so a price/special change is a single edit that
+// propagates to every call automatically — no code edit, no branch drift.
+//
+// SAFETY: DEFAULT_CONTENT below mirrors the live record exactly. If the
+// fetch fails, times out, or returns something that fails validation, the
+// agent falls back to DEFAULT_CONTENT — i.e. it behaves EXACTLY as it did
+// before this change. A bad publish can never break a live call or quote a
+// blocked/obsolete figure (validateContent rejects those).
+// ============================================================
+const CONTENT_URL     = process.env.CONTENT_URL || 'https://mattgabmanagement.com/content-api.php';
+const CONTENT_TTL_MS  = 60 * 1000; // re-check the store at most once a minute
+
+const DEFAULT_CONTENT = {
+  meta: { version: 0, effective_date: 'baseline', updated_by: 'DEFAULT_CONTENT' },
+  utilities_line: 'ALL UTILITIES INCLUDED IN RENT.',
+  obsolete_figures: ['ten fifty', 'eleven hundred', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty', 'seventeen fifty'],
+  obsolete_figures_pronunciation_extra: ['twelve hundred ninety five'],
+  properties: {
+    nmfa: {
+      hours_en: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
+      hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
+      units_note: 'NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms are temporarily unavailable, so do not quote a 1-bedroom price or move-in; if asked, say our 1-bedrooms are temporarily unavailable and we have 2-bedrooms ready now. There are no 3-bedroom units at NMFA. Our 3-bedrooms are at Windsong.',
+      unit_types: {
+        '1br': { status: 'temporarily_unavailable', quotable: false },
+        '2br': {
+          status: 'available', quotable: true,
+          sqft_line: '880 square feet, 2 bed, 1 and a half baths',
+          base_spoken: 'nine ninety five', base_spoken_alt: 'nine hundred ninety five', base_num: 995,
+          utils_spoken: 'twelve ninety five', utils_num: 1295,
+          std12_utils_spoken: 'fifteen hundred', std12_utils_num: 1500,
+          deposit_spoken: 'one thousand', deposit_spoken_es: 'mil', deposit_num: 1000,
+          special_term_months: 6
+        },
+        '3br': { status: 'not_offered' }
+      }
+    },
+    windsong: {
+      hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
+      hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
+      units_note: 'NOTE: Windsong has 2-bedrooms and 3-bedrooms only. There are no 1-bedroom units at Windsong, and our 1-bedrooms at North Mountain Foothills are temporarily unavailable right now. Windsong pricing is a standard move-in special.',
+      unit_types: {
+        '1br': { status: 'not_offered' },
+        '2br': {
+          status: 'available', quotable: true,
+          base_spoken: 'nine ninety five', base_spoken_alt: 'nine hundred ninety five', base_num: 995,
+          utils_spoken: 'twelve ninety five', utils_num: 1295,
+          movein_total_spoken: 'fourteen hundred', movein_total_spoken_es: 'mil cuatrocientos', movein_total_num: 1400,
+          movein_deposit_num: 900, movein_first_num: 500
+        },
+        '3br': {
+          status: 'available', quotable: true,
+          base_spoken: 'fifteen hundred', base_num: 1500,
+          utils_spoken: 'eighteen hundred', utils_num: 1800,
+          movein_total_spoken: 'sixteen hundred fifty', movein_total_spoken_es: 'mil seiscientos cincuenta', movein_total_num: 1650,
+          movein_deposit_num: 900, movein_first_num: 750
+        }
+      }
+    }
+  }
+};
+
+let CONTENT_CACHE = DEFAULT_CONTENT; // last-known-good; starts as the safe baseline
+let CONTENT_TS    = 0;
+
+// Reject anything structurally wrong OR that would leak an obsolete/blocked
+// figure as a live price. On failure we keep the last-known-good copy.
+function validateContent(d) {
+  try {
+    if (!d || !d.properties) return false;
+    const obsolete = new Set([...(d.obsolete_figures || []), ...(d.obsolete_figures_pronunciation_extra || [])]);
+    for (const key of ['nmfa', 'windsong']) {
+      const p = d.properties[key];
+      if (!p || !p.unit_types || !p.hours_en || !p.hours_es || !p.units_note) return false;
+      for (const ut of Object.values(p.unit_types)) {
+        if (!ut || typeof ut.status !== 'string') return false;
+        if (ut.quotable) {
+          // Every quotable unit must carry a spoken base price, and no live
+          // spoken price may be one of the retired/obsolete figures.
+          const spokens = [ut.base_spoken, ut.base_spoken_alt, ut.utils_spoken, ut.std12_utils_spoken, ut.movein_total_spoken].filter(Boolean);
+          if (!ut.base_spoken) return false;
+          for (const s of spokens) if (obsolete.has(s)) return false;
+        }
+      }
+    }
+    return true;
+  } catch { return false; }
+}
+
+// Fetch the content record, cache it, and NEVER throw. A fetch/parse/validate
+// failure leaves CONTENT_CACHE untouched (last-known-good, seeded to DEFAULT).
+async function loadContent() {
+  const now = Date.now();
+  if (now - CONTENT_TS < CONTENT_TTL_MS) return CONTENT_CACHE;
+  CONTENT_TS = now; // stamp first so a hang can't cause a fetch stampede
+  try {
+    const res = await fetch(CONTENT_URL, { signal: AbortSignal.timeout(2500) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (validateContent(data)) {
+      CONTENT_CACHE = data;
+      console.log(`Content store loaded: v${data.meta?.version ?? '?'} (${data.meta?.effective_date ?? 'n/a'})`);
+    } else {
+      console.warn('Content store failed validation — keeping last-known-good');
+    }
+  } catch (err) {
+    console.warn('Content store fetch failed, using last-known-good:', err.message);
+  }
+  return CONTENT_CACHE;
+}
+
+// Render the property's UNITS summary block from the content record. This is
+// the text that fills ${property.units} in the system prompt.
+function renderUnitsBlock(key, content) {
+  const p = content.properties[key];
+  if (key === 'nmfa') {
+    const u = p.unit_types['2br'];
+    return `\n2 bedroom: ${u.base_spoken} per month base, or ${u.utils_spoken} per month with all utilities included, on our 6-month lease special, approval-based. On a standard 12-month lease the 2 bedroom is ${u.std12_utils_spoken} per month with all utilities included. ${u.sqft_line}.\n${p.units_note}`;
+  }
+  const u2 = p.unit_types['2br'];
+  const u3 = p.unit_types['3br'];
+  return `\n2 bedroom: ${u2.base_spoken} per month base, or ${u2.utils_spoken} per month with all utilities included.\n3 bedroom: ${u3.base_spoken} per month base, or ${u3.utils_spoken} per month with all utilities included.\n${p.units_note}`;
+}
+
+// ============================================================
 // SESSION STORAGE
 // ============================================================
 const sessions = new Map();
@@ -69,7 +197,15 @@ const sessions = new Map();
 // ============================================================
 // SYSTEM PROMPT BUILDER (aligned with chat widget voice and rules)
 // ============================================================
-function buildSystemPrompt(property) {
+function buildSystemPrompt(property, content) {
+  const CC   = content || DEFAULT_CONTENT;
+  const NM2  = CC.properties.nmfa.unit_types['2br'];       // NMFA 2-bedroom prices
+  const WS2  = CC.properties.windsong.unit_types['2br'];   // Windsong 2-bedroom prices
+  const WS3  = CC.properties.windsong.unit_types['3br'];   // Windsong 3-bedroom prices
+  const OBS  = CC.obsolete_figures || [];
+  const OBSX = CC.obsolete_figures_pronunciation_extra || [];
+  // "a", "b", or "c"  — matches the exact prose format used in the prompt.
+  const orList = (arr) => arr.map(x => `"${x}"`).join(', ').replace(/, ("[^"]*")$/, ', or $1');
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 
 ADDRESS RULE:
@@ -85,14 +221,14 @@ PRICING RULES — STRICT (TWO-TIER) — PROPERTY-SCOPED:
 - ALWAYS quote BOTH the base rent and the with-utilities-included rate when pricing comes up. Lead with the base, then mention the with-utilities rate, then pivot to the tour.
 ${property.key === 'nmfa' ? `- THIS LINE IS NMFA. NMFA has 2 bedroom units available right now. There is NO 3 bedroom at NMFA. Never speak any 3-bedroom monthly figure on this call.
 - 1 bedroom: TEMPORARILY UNAVAILABLE. Do NOT quote a 1-bedroom price, base or with-utilities. If asked, say "our 1-bedrooms are temporarily unavailable right now, but we have 2-bedrooms ready now," and lead with the 2 bedroom.
-- 2 bedroom (6-month lease special, approval-based): "nine ninety five per month base, or twelve ninety five per month with all utilities included." On a standard 12-month lease, the 2 bedroom is "fifteen hundred per month with all utilities included."
+- 2 bedroom (6-month lease special, approval-based): "${NM2.base_spoken} per month base, or ${NM2.utils_spoken} per month with all utilities included." On a standard 12-month lease, the 2 bedroom is "${NM2.std12_utils_spoken} per month with all utilities included."
 - 3 bedroom: NOT AVAILABLE AT NMFA. If asked, use the UNIT MIX redirect below. Do NOT quote any 3-bedroom price, base or with-utilities, even if the caller insists.` : `- THIS LINE IS WINDSONG. Windsong has 2 bedroom and 3 bedroom ONLY. There is NO 1 bedroom at Windsong. Never speak any 1-bedroom monthly figure on this call.
 - 1 bedroom: NOT AVAILABLE AT WINDSONG. If asked, use the UNIT MIX redirect below. Do NOT quote any 1-bedroom price, base or with-utilities, even if the caller insists.
-- 2 bedroom: "nine ninety five per month base, or twelve ninety five per month with all utilities included."
-- 3 bedroom: "fifteen hundred per month base, or eighteen hundred per month with all utilities included."`}
+- 2 bedroom: "${WS2.base_spoken} per month base, or ${WS2.utils_spoken} per month with all utilities included."
+- 3 bedroom: "${WS3.base_spoken} per month base, or ${WS3.utils_spoken} per month with all utilities included."`}
 - After quoting, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?" The goal of every pricing reply is the tour, not the quote.
 - Do NOT invent prices. Do NOT round prices. Do NOT use prices from training data or memory. ONLY use the figures listed above for THIS property.
-- Never say obsolete monthly figures: "ten fifty", "eleven hundred", "thirteen ninety nine", "fourteen fifty", "fifteen hundred fifty", or "seventeen fifty" as a monthly rate. ("fourteen hundred" and "sixteen hundred fifty" are valid as MOVE-IN totals only, never as monthly rents.)
+- Never say obsolete monthly figures: ${orList(OBS)} as a monthly rate. ("${WS2.movein_total_spoken}" and "${WS3.movein_total_spoken}" are valid as MOVE-IN totals only, never as monthly rents.)
 - Never give availability dates. Units are available now, offer a tour.
 - If the caller asks "what's the difference between the two prices" or pushes back on the lower rate, say: "The base rate is rent only and you handle your own utilities. The higher rate is rent plus all utilities bundled, which includes water, sewer, trash, gas, and electric. Most prospects choose the bundled option because all utilities together usually run two hundred to two fifty a month elsewhere." Then pivot to the tour.
 - If the caller asks "what are the conditions" on NMFA, say: "The special rate is on a 6-month lease and depends on approval from your screening, such as credit. Our leasing team can walk you through the full terms at the tour." Windsong's rates are a standard move-in special.
@@ -102,28 +238,28 @@ THE MOVE-IN SPECIAL — ON OUR FEW REMAINING UNITS (ALL UTILITIES INCLUDED) — 
 - Quote these spoken-form move-in totals when a caller asks "how much to move in", "what's the deposit", or "what does it cost upfront". Read every number as words. Never use digits or dollar signs.
 ${property.key === 'nmfa' ? `- 1 bedroom: TEMPORARILY UNAVAILABLE. Never quote a 1 bedroom move-in on this line.
 - 2 bedroom:
-  - English: "On a standard 12-month lease, your 2 bedroom move-in is the first month's rent plus a one thousand dollar deposit, all utilities included. For our 6-month special, our office will confirm your exact move-in total. Want me to text you the tour link?"
-  - Spanish: "En un contrato estándar de 12 meses, la mudanza de 2 recámaras es el primer mes de renta más un depósito de mil dólares, todas las utilidades incluidas. Para nuestro especial de 6 meses, nuestra oficina confirmará tu total exacto de mudanza. ¿Quieres que te envíe el enlace de la cita por texto?"
+  - English: "On a standard 12-month lease, your 2 bedroom move-in is the first month's rent plus a ${NM2.deposit_spoken} dollar deposit, all utilities included. For our 6-month special, our office will confirm your exact move-in total. Want me to text you the tour link?"
+  - Spanish: "En un contrato estándar de 12 meses, la mudanza de 2 recámaras es el primer mes de renta más un depósito de ${NM2.deposit_spoken_es} dólares, todas las utilidades incluidas. Para nuestro especial de 6 meses, nuestra oficina confirmará tu total exacto de mudanza. ¿Quieres que te envíe el enlace de la cita por texto?"
 - 3 bedroom: NOT AVAILABLE AT NMFA. Never quote a 3 bedroom move-in on this line. Do NOT speak any 3-bedroom deposit, first-month, or total figure on this call.` : `- 1 bedroom: NOT AVAILABLE AT WINDSONG. Never quote a 1 bedroom move-in on this line. Do NOT speak any 1-bedroom deposit, first-month, or total figure on this call.
 - 2 bedroom:
-  - English: "Our 2 bedroom move-in can be as low as fourteen hundred total for qualified applicants, conditions apply, all utilities included, and our leasing team will go over the details with you. Want me to text you the tour link?"
-  - Spanish: "La mudanza de 2 recámaras puede ser desde mil cuatrocientos dólares en total para solicitantes calificados, aplican condiciones, todas las utilidades incluidas, y nuestro equipo de arrendamiento revisará los detalles contigo. ¿Quieres que te envíe el enlace de la cita por texto?"
+  - English: "Our 2 bedroom move-in can be as low as ${WS2.movein_total_spoken} total for qualified applicants, conditions apply, all utilities included, and our leasing team will go over the details with you. Want me to text you the tour link?"
+  - Spanish: "La mudanza de 2 recámaras puede ser desde ${WS2.movein_total_spoken_es} dólares en total para solicitantes calificados, aplican condiciones, todas las utilidades incluidas, y nuestro equipo de arrendamiento revisará los detalles contigo. ¿Quieres que te envíe el enlace de la cita por texto?"
 - 3 bedroom:
-  - English: "Our 3 bedroom move-in can be as low as sixteen hundred fifty total for qualified applicants, conditions apply, all utilities included, and our leasing team will go over the details with you. Want me to text you the tour link?"
-  - Spanish: "La mudanza de 3 recámaras puede ser desde mil seiscientos cincuenta dólares en total para solicitantes calificados, aplican condiciones, todas las utilidades incluidas, y nuestro equipo de arrendamiento revisará los detalles contigo. ¿Quieres que te envíe el enlace de la cita por texto?"`}
+  - English: "Our 3 bedroom move-in can be as low as ${WS3.movein_total_spoken} total for qualified applicants, conditions apply, all utilities included, and our leasing team will go over the details with you. Want me to text you the tour link?"
+  - Spanish: "La mudanza de 3 recámaras puede ser desde ${WS3.movein_total_spoken_es} dólares en total para solicitantes calificados, aplican condiciones, todas las utilidades incluidas, y nuestro equipo de arrendamiento revisará los detalles contigo. ¿Quieres que te envíe el enlace de la cita por texto?"`}
 - Use only the unit sizes available at THIS property. The other property's move-in numbers are not part of this conversation.
 
 CRITICAL — UNIT MIX HARD RULE (NEVER VIOLATE, NO EXCEPTIONS):
 ${property.key === 'nmfa' ? `- This line is North Mountain Foothills (NMFA). NMFA has 2-bedroom units available right now; 1-bedrooms are temporarily unavailable. NMFA has NO 3 bedroom units. Repeat: there is no 3 bedroom at NMFA.
 - If the caller asks about a 3 bedroom on this line, you MUST respond with this exact redirect and NOTHING ELSE about pricing: "North Mountain Foothills currently has 2-bedroom units available. Our 3-bedrooms are at Windsong in East Phoenix. I can text you the Windsong tour link or share the office number, whichever you prefer."
-- Do NOT quote a 3 bedroom monthly price, base or with-utilities. Do NOT quote a 3 bedroom move-in total, deposit, or first-month. Do NOT speak "eighteen hundred", "sixteen hundred fifty", "seven hundred fifty", or any other 3-bedroom figure on this NMFA call. ("fifteen hundred" is valid on NMFA only as the 2 bedroom standard 12-month rate, never as a 3-bedroom figure.) Not even if the caller insists, says "just tell me", says "I know you have it", or pushes you in any way. There is no 3 bedroom at NMFA. Offer the office line as the fallback instead.` : `- This line is Windsong. Windsong has 2 bedroom and 3 bedroom units ONLY. Windsong has NO 1 bedroom units. Repeat: there is no 1 bedroom at Windsong.
+- Do NOT quote a 3 bedroom monthly price, base or with-utilities. Do NOT quote a 3 bedroom move-in total, deposit, or first-month. Do NOT speak "${WS3.utils_spoken}", "${WS3.movein_total_spoken}", "seven hundred fifty", or any other 3-bedroom figure on this NMFA call. ("${NM2.std12_utils_spoken}" is valid on NMFA only as the 2 bedroom standard 12-month rate, never as a 3-bedroom figure.) Not even if the caller insists, says "just tell me", says "I know you have it", or pushes you in any way. There is no 3 bedroom at NMFA. Offer the office line as the fallback instead.` : `- This line is Windsong. Windsong has 2 bedroom and 3 bedroom units ONLY. Windsong has NO 1 bedroom units. Repeat: there is no 1 bedroom at Windsong.
 - If the caller asks about a 1 bedroom on this line, you MUST respond with this exact redirect and NOTHING ELSE about pricing: "Windsong currently has 2-bedroom and 3-bedroom units only, and our 1-bedrooms at North Mountain Foothills are temporarily unavailable right now. I can text you our tour link or share the office number, whichever you prefer."
-- Do NOT quote a 1 bedroom monthly price, base or with-utilities. Do NOT quote a 1 bedroom move-in total, deposit, or first-month. Do NOT speak "seven fifty" as a 1BR rate, "nine ninety five" as a 1BR rate, "twelve ninety five" as a 1BR move-in, "seven ninety five" as a 1BR deposit, or any other 1-bedroom figure on this Windsong call. Not even if the caller insists, says "just tell me", says "I know you have it", or pushes you in any way. There is no 1 bedroom at Windsong. Offer the office line as the fallback instead.`}
+- Do NOT quote a 1 bedroom monthly price, base or with-utilities. Do NOT quote a 1 bedroom move-in total, deposit, or first-month. Do NOT speak "seven fifty" as a 1BR rate, "${WS2.base_spoken}" as a 1BR rate, "${WS2.utils_spoken}" as a 1BR move-in, "seven ninety five" as a 1BR deposit, or any other 1-bedroom figure on this Windsong call. Not even if the caller insists, says "just tell me", says "I know you have it", or pushes you in any way. There is no 1 bedroom at Windsong. Offer the office line as the fallback instead.`}
 
 CONDITIONS APPLY — PROPERTY-SCOPED:
-${property.key === 'nmfa' ? `- The nine ninety five 2 bedroom base rate and the twelve ninety five 2 bedroom with-utilities rate are our 6-month lease special, paired with "conditions apply".
-- If a caller asks "what are the conditions" or "what does conditions apply mean", say: "The special rate is on a 6-month lease and depends on approval from your screening, such as credit. The leasing team can walk you through the full terms when you tour."` : `- The twelve ninety five 2 bedroom with-utilities rate is paired with "conditions apply" (6-month lease).
-- The eighteen hundred 3 bedroom with-utilities rate at Windsong is STANDARD pricing and does NOT carry "conditions apply" — do not attach conditions to the 3 bedroom rate.
+${property.key === 'nmfa' ? `- The ${NM2.base_spoken} 2 bedroom base rate and the ${NM2.utils_spoken} 2 bedroom with-utilities rate are our 6-month lease special, paired with "conditions apply".
+- If a caller asks "what are the conditions" or "what does conditions apply mean", say: "The special rate is on a 6-month lease and depends on approval from your screening, such as credit. The leasing team can walk you through the full terms when you tour."` : `- The ${WS2.utils_spoken} 2 bedroom with-utilities rate is paired with "conditions apply" (6-month lease).
+- The ${WS3.utils_spoken} 3 bedroom with-utilities rate at Windsong is STANDARD pricing and does NOT carry "conditions apply" — do not attach conditions to the 3 bedroom rate.
 - If a caller asks "what are the conditions" on the 2 bedroom, say: "The rate is on a 6-month lease. The leasing team can walk you through the full terms when you tour."`}
 - Do NOT lead with "6-month lease" framing. Lead with the price and let the caller ask for the conditions.
 
@@ -259,7 +395,7 @@ RULES
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
-- Write all prices as full words. ${property.key === 'nmfa' ? `Valid MONTHLY figures on THIS NMFA line: "nine ninety five" or "nine hundred ninety five" (2BR base, 6-month special), "twelve ninety five" (2BR with utilities, 6-month special), "fifteen hundred" (2BR on a standard 12-month lease, with utilities). 1-bedrooms are temporarily unavailable, so NEVER quote a 1BR figure such as "seven fifty", "seven ninety five", or any 1BR rate or move-in. For move-in, the only figures are the first month's rent plus a "one thousand" dollar deposit on a 12-month lease; for the 6-month special the office confirms the exact total, so do not state a specific 6-month move-in total. NEVER say "eighteen hundred", "sixteen hundred fifty", or "seven hundred fifty" on this NMFA line — those are Windsong 3BR figures and there is no 3 bedroom at NMFA.` : `Valid MONTHLY figures on THIS Windsong line: "nine ninety five" or "nine hundred ninety five" (2BR base), "twelve ninety five" (2BR with utilities), "fifteen hundred" (3BR base), "eighteen hundred" (3BR with utilities). Valid MOVE-IN total figures, always framed as "as low as ... conditions apply": "fourteen hundred" (2BR move-in), "sixteen hundred fifty" (3BR move-in). Do not quote a deposit or first-month breakdown for move-in. NEVER say "seven fifty" as a 1BR rate, "nine ninety five" as a 1BR rate, "twelve ninety five" as a 1BR move-in, or any 1-bedroom figure on this Windsong line — there is no 1 bedroom at Windsong.`} NEVER use "ten fifty", "eleven hundred", "thirteen ninety nine", "fourteen fifty", "fifteen hundred fifty", "seventeen fifty", or "twelve hundred ninety five" anywhere; those are obsolete monthly figures we no longer quote.
+- Write all prices as full words. ${property.key === 'nmfa' ? `Valid MONTHLY figures on THIS NMFA line: "${NM2.base_spoken}" or "${NM2.base_spoken_alt}" (2BR base, 6-month special), "${NM2.utils_spoken}" (2BR with utilities, 6-month special), "${NM2.std12_utils_spoken}" (2BR on a standard 12-month lease, with utilities). 1-bedrooms are temporarily unavailable, so NEVER quote a 1BR figure such as "seven fifty", "seven ninety five", or any 1BR rate or move-in. For move-in, the only figures are the first month's rent plus a "${NM2.deposit_spoken}" dollar deposit on a 12-month lease; for the 6-month special the office confirms the exact total, so do not state a specific 6-month move-in total. NEVER say "${WS3.utils_spoken}", "${WS3.movein_total_spoken}", or "seven hundred fifty" on this NMFA line — those are Windsong 3BR figures and there is no 3 bedroom at NMFA.` : `Valid MONTHLY figures on THIS Windsong line: "${WS2.base_spoken}" or "${WS2.base_spoken_alt}" (2BR base), "${WS2.utils_spoken}" (2BR with utilities), "${WS3.base_spoken}" (3BR base), "${WS3.utils_spoken}" (3BR with utilities). Valid MOVE-IN total figures, always framed as "as low as ... conditions apply": "${WS2.movein_total_spoken}" (2BR move-in), "${WS3.movein_total_spoken}" (3BR move-in). Do not quote a deposit or first-month breakdown for move-in. NEVER say "seven fifty" as a 1BR rate, "${WS2.base_spoken}" as a 1BR rate, "${WS2.utils_spoken}" as a 1BR move-in, or any 1-bedroom figure on this Windsong line — there is no 1 bedroom at Windsong.`} NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete monthly figures we no longer quote.
 - Write all numbers as words when speaking about prices.
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
@@ -660,7 +796,21 @@ fastify.register(async function(fastify) {
           const callSid = msg.callSid;
           const to = msg.to || '';
           const from = msg.from || '';
-          const property = PROPERTIES[to] || PROPERTIES[Object.keys(PROPERTIES)[0]];
+          const baseProperty = PROPERTIES[to] || PROPERTIES[Object.keys(PROPERTIES)[0]];
+
+          // Pull live marketing content (prices / hours / units summary) once
+          // per call, falling back to the baked-in baseline if the store is
+          // unreachable or invalid. The effective `property` carries the
+          // content-driven hours + units so every downstream reference
+          // (hours intercept, escalation prompt, pricing) stays in sync.
+          const content = await loadContent();
+          const cp = content.properties[baseProperty.key] || DEFAULT_CONTENT.properties[baseProperty.key];
+          const property = {
+            ...baseProperty,
+            hours: cp.hours_en,
+            hours_es: cp.hours_es,
+            units: renderUnitsBlock(baseProperty.key, content)
+          };
 
           sessions.set(callSid, {
             callSid, to, from, property,
@@ -669,7 +819,7 @@ fastify.register(async function(fastify) {
             sent: [],
             activeStream: null,
             conversation: [
-              { role: 'system', content: buildSystemPrompt(property) }
+              { role: 'system', content: buildSystemPrompt(property, content) }
             ]
           });
           ws.callSid = callSid;
