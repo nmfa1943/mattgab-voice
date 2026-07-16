@@ -31,6 +31,7 @@ const PROPERTIES = {
     hours: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
     hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
+    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
 2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included, on our 6-month lease special, approval-based. On a standard 12-month lease the 2 bedroom is fifteen hundred per month with all utilities included. 880 square feet, 2 bed, 1 and a half baths.
 NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms are temporarily unavailable, so do not quote a 1-bedroom price or move-in; if asked, say our 1-bedrooms are temporarily unavailable and we have 2-bedrooms ready now. There are no 3-bedroom units at NMFA. Our 3-bedrooms are at Windsong.`,
@@ -48,6 +49,7 @@ NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms ar
     hours: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
     hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
+    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
     units: `
 2 bedroom: nine ninety five per month base, or twelve ninety five per month with all utilities included.
 3 bedroom: fifteen hundred per month base, or eighteen hundred per month with all utilities included.
@@ -906,7 +908,7 @@ fastify.register(async function(fastify) {
                   if (intent === 'tour') {
                     await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${property.tour_link}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
                   } else if (intent === 'apply') {
-                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
+                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
                   } else if (intent === 'portal') {
                     await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
                   }
