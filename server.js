@@ -492,8 +492,11 @@ function isValidName_(s) {
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
-  const junk = /^(calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
-  if (junk.test(t)) return false;
+  const junk = /^(calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
+  // Strip accents (decompose + drop combining marks) so accented affirmations
+  // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
+  const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
+  if (junk.test(t) || junk.test(tAscii)) return false;
   // Reject unit-code patterns like "D12", "A11", "C24" — those are unit
   // tags from current residents, not caller names.
   if (/^[a-z]\s?\d{1,3}$/i.test(t)) return false;
@@ -504,7 +507,7 @@ function isValidName_(s) {
   // Word boundary \b is ASCII-only in JS, so we explicitly anchor with (\s|$)
   // to catch accented Spanish question-starters like "qué" and "cómo".
   if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)(\s|$)/i.test(t)) return false;
-  if (t.split(/\s+/).length > 3) return false;
+  if (t.split(/\s+/).length > 4) return false;
   return true;
 }
 
