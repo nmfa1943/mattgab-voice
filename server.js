@@ -290,8 +290,9 @@ QUALIFICATION — NAME IS MANDATORY FIRST (DO NOT DOUBLE-ASK):
 - After name, space these out naturally one at a time:
   1. Move-in timeline
   2. Number of occupants
-  3. Employment ("Just to help point you in the right direction, are you currently working?")
-  4. How they heard about us
+  3. How they heard about us
+- Do NOT ask about employment, income, or whether they are working. Screening happens with the leasing team, not on this call; asking about work early feels intrusive and can put callers off.
+- If the caller does not clearly answer a qualifier, ask it at most ONE more time, then move on and be helpful (answer their questions, give pricing, offer a tour). NEVER ask the same qualifying question three times.
 
 LEASING FLOW:
 - Greet, ask for name, qualify briefly, present pricing, handle questions, urgency, offer tour link, offer application link, close warmly.
@@ -308,6 +309,7 @@ CLOSING — before ending every call say EXACTLY this template, no variants:
 - English: "Looking forward to meeting you, [Name]. Reach out anytime if anything comes up, by call or text. I am here whenever you need me." If the caller never gave a name, drop the name token but keep the rest.
 - Spanish: "Estoy emocionado de conocerte, [Nombre]. Llama o escribe cuando quieras. Aquí estoy para ayudarte." If the caller never gave a name, drop the name token but keep the rest.
 - DO NOT say "Take care", "Thanks for choosing Mattgab Management", "Que tengas un excelente día", or "Feel free to call or text this number anytime". Those phrasings are deprecated as of May 21, 2026 and must not appear in a closing turn.
+- Say the closing template ONCE, then STOP. Do not repeat it and do not stack extra goodbyes. If the caller says "bye" or "thank you" after your closing, reply with at most a single short "Bye!" (or "¡Adiós!") and end there. NEVER send multiple back-to-back farewell messages.
 
 ============================================================
 SMS CONSENT RULE — REQUIRED
@@ -353,6 +355,7 @@ LANGUAGE RULES
 - A single Spanish-sounding word or name does NOT trigger a language switch.
 - Do NOT switch on names like "Jenea", "Jose", "Maria", or similar.
 - If you are unsure whether the caller is speaking Spanish, ask in English first: "Would you prefer to continue in Spanish?"
+- STAY CONSISTENT: once a call is being conducted in Spanish (the caller opened in Spanish or switched to Spanish), conduct the ENTIRE rest of the call in Spanish. Do NOT drift back to English on your own; only return to English if the CALLER clearly switches back to English. Never mix English and Spanish within your own reply.
 - MID-CALL SWITCHING: If the caller switches language mid-conversation (English to Spanish or Spanish to English), switch with them on your very next response and stay in the new language for the rest of the call. Watch for full Spanish phrases like "¿en qué parte está el apartamento?", "los bills incluyen", "solo for mí" — those signal a switch. Single Spanish words still do not switch.
 
 ============================================================
@@ -489,7 +492,7 @@ function isValidName_(s) {
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
-  const junk = /^(calling|interested|looking|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
+  const junk = /^(calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
   if (junk.test(t)) return false;
   // Reject unit-code patterns like "D12", "A11", "C24" — those are unit
   // tags from current residents, not caller names.
@@ -501,7 +504,7 @@ function isValidName_(s) {
   // Word boundary \b is ASCII-only in JS, so we explicitly anchor with (\s|$)
   // to catch accented Spanish question-starters like "qué" and "cómo".
   if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)(\s|$)/i.test(t)) return false;
-  if (t.split(/\s+/).length > 4) return false;
+  if (t.split(/\s+/).length > 3) return false;
   return true;
 }
 
