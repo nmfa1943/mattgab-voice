@@ -1,0 +1,572 @@
+<title>Lead Inbox — Mattgab Leasing</title>
+<style>
+  :root {
+    --ground: #F6F8F8;
+    --surface: #FFFFFF;
+    --surface-2: #FBFCFC;
+    --ink: #17232A;
+    --muted: #5D6B72;
+    --faint: #8A969C;
+    --border: #E4E9EA;
+    --border-strong: #D2DADB;
+    --accent: #0E7C6B;
+    --accent-soft: #E1F0ED;
+    --accent-ink: #0A5A4E;
+    --c-new: #2563EB;      --c-new-bg: #E7EEFE;
+    --c-await: #B45309;    --c-await-bg: #FBEEDD;
+    --c-replied: #177E4A;  --c-replied-bg: #E2F1E8;
+    --c-stale: #C0344D;    --c-stale-bg: #FBE5E9;
+    --shadow: 0 1px 2px rgba(23,35,42,.05), 0 4px 14px rgba(23,35,42,.05);
+    --radius: 10px;
+    --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0F1719;
+      --surface: #16211F;
+      --surface-2: #131D1B;
+      --ink: #E8EEEC;
+      --muted: #9AA8A5;
+      --faint: #6E7C79;
+      --border: #223230;
+      --border-strong: #2E4340;
+      --accent: #3FBFA8;
+      --accent-soft: #16302B;
+      --accent-ink: #7FD9C8;
+      --c-new: #6BA0FF;      --c-new-bg: #16233D;
+      --c-await: #E7A24B;    --c-await-bg: #35270F;
+      --c-replied: #57C089;  --c-replied-bg: #12301F;
+      --c-stale: #F0788C;    --c-stale-bg: #341018;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --ground: #F6F8F8; --surface: #FFFFFF; --surface-2: #FBFCFC;
+    --ink: #17232A; --muted: #5D6B72; --faint: #8A969C;
+    --border: #E4E9EA; --border-strong: #D2DADB;
+    --accent: #0E7C6B; --accent-soft: #E1F0ED; --accent-ink: #0A5A4E;
+    --c-new: #2563EB; --c-new-bg: #E7EEFE;
+    --c-await: #B45309; --c-await-bg: #FBEEDD;
+    --c-replied: #177E4A; --c-replied-bg: #E2F1E8;
+    --c-stale: #C0344D; --c-stale-bg: #FBE5E9;
+    --shadow: 0 1px 2px rgba(23,35,42,.05), 0 4px 14px rgba(23,35,42,.05);
+  }
+  :root[data-theme="dark"] {
+    --ground: #0F1719; --surface: #16211F; --surface-2: #131D1B;
+    --ink: #E8EEEC; --muted: #9AA8A5; --faint: #6E7C79;
+    --border: #223230; --border-strong: #2E4340;
+    --accent: #3FBFA8; --accent-soft: #16302B; --accent-ink: #7FD9C8;
+    --c-new: #6BA0FF; --c-new-bg: #16233D;
+    --c-await: #E7A24B; --c-await-bg: #35270F;
+    --c-replied: #57C089; --c-replied-bg: #12301F;
+    --c-stale: #F0788C; --c-stale-bg: #341018;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 6px 18px rgba(0,0,0,.35);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .demo-note {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 12.5px;
+    text-align: center;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: .01em;
+  }
+  .demo-note strong { font-weight: 650; }
+
+  header.topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 16px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(150deg, var(--accent), var(--accent-ink));
+    display: grid; place-items: center;
+    color: #fff; font-weight: 700; font-size: 16px;
+    box-shadow: var(--shadow);
+  }
+  .brand h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .brand .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 14px 9px;
+    min-width: 88px;
+  }
+  .stat .n { font-size: 21px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+  .stat .l { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 5px; }
+  .stat.accent .n { color: var(--accent); }
+  .stat.await .n { color: var(--c-await); }
+  .stat.stale .n { color: var(--c-stale); }
+
+  .theme-toggle {
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 7px 11px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { color: var(--ink); border-color: var(--accent); }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 210px minmax(320px, 1fr) minmax(320px, 1.15fr);
+    gap: 0;
+    height: calc(100vh - 116px);
+    min-height: 520px;
+  }
+
+  /* filter rail */
+  aside.rail {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    padding: 18px 14px;
+    overflow-y: auto;
+  }
+  .rail h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--faint); margin: 0 0 8px 6px; font-weight: 650;
+  }
+  .rail .group { margin-bottom: 22px; }
+  .filt {
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; text-align: left;
+    border: none; background: none; color: var(--ink);
+    font-family: inherit; font-size: 13.5px;
+    padding: 7px 8px; border-radius: 7px; cursor: pointer;
+  }
+  .filt:hover { background: var(--surface-2); }
+  .filt.active { background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+  .filt .cnt {
+    font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums;
+    background: var(--ground); border-radius: 20px; padding: 1px 8px;
+  }
+  .filt.active .cnt { background: var(--surface); color: var(--accent-ink); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+
+  /* list */
+  section.list { border-right: 1px solid var(--border); overflow-y: auto; background: var(--ground); }
+  .list-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--ground);
+    padding: 12px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .list-head .ttl { font-size: 13px; font-weight: 650; }
+  .list-head .ct { font-size: 12px; color: var(--muted); }
+  .search { position: relative; margin: 10px 16px; }
+  .search input {
+    width: 100%; border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--ink); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; font-family: inherit;
+  }
+  .search input:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+
+  .card {
+    display: block; width: 100%; text-align: left;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px;
+    margin: 8px 16px; cursor: pointer; font-family: inherit;
+    transition: border-color .12s, box-shadow .12s;
+    position: relative;
+  }
+  .card:hover { border-color: var(--border-strong); box-shadow: var(--shadow); }
+  .card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card.unread::before {
+    content: ""; position: absolute; left: -1px; top: 14px; bottom: 14px;
+    width: 3px; border-radius: 3px; background: var(--c-new);
+  }
+  .card .row1 { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .card .name { font-weight: 650; font-size: 14.5px; letter-spacing: -.01em; }
+  .card.unread .name { color: var(--ink); }
+  .card .time { font-size: 11.5px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .card .prev { font-size: 13px; color: var(--muted); margin-top: 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .card .meta { display: flex; align-items: center; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+
+  .chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 20px;
+    display: inline-flex; align-items: center; gap: 5px; font-weight: 550;
+    border: 1px solid transparent;
+  }
+  .chip.src { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+  .chip.prop { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+  .st-new { background: var(--c-new-bg); color: var(--c-new); }
+  .st-await { background: var(--c-await-bg); color: var(--c-await); }
+  .st-replied { background: var(--c-replied-bg); color: var(--c-replied); }
+  .st-stale { background: var(--c-stale-bg); color: var(--c-stale); }
+  .chip .dot { margin: 0; }
+
+  .warn-flag {
+    font-size: 11px; color: var(--c-await); display: inline-flex; align-items: center; gap: 4px; font-weight: 550;
+  }
+
+  /* detail */
+  section.detail { overflow-y: auto; background: var(--surface); }
+  .detail-empty { height: 100%; display: grid; place-items: center; color: var(--faint); padding: 40px; text-align: center; }
+  .detail-empty .big { font-size: 34px; margin-bottom: 10px; opacity: .5; }
+  .dhead { padding: 20px 24px 16px; border-bottom: 1px solid var(--border); }
+  .dhead .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .dhead h3 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+  .dhead .contact { margin-top: 6px; font-size: 13.5px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
+  .dhead .contact a { color: var(--accent); text-decoration: none; }
+  .dhead .contact a:hover { text-decoration: underline; }
+  .dmeta { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+
+  .dsection { padding: 18px 24px; border-bottom: 1px solid var(--border); }
+  .dsection h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); margin: 0 0 10px; font-weight: 650; }
+  .ai-summary { background: var(--surface-2); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; padding: 12px 14px; font-size: 14px; color: var(--ink); }
+  .ai-summary.missing { border-left-color: var(--c-await); color: var(--muted); font-style: italic; display: flex; gap: 8px; align-items: center; }
+
+  .thread { display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 82%; padding: 9px 13px; border-radius: 12px; font-size: 13.5px; line-height: 1.45; }
+  .msg .who { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--faint); margin-bottom: 3px; }
+  .msg.in { background: var(--surface-2); border: 1px solid var(--border); border-top-left-radius: 4px; align-self: flex-start; }
+  .msg.out { background: var(--accent-soft); color: var(--accent-ink); border-top-right-radius: 4px; align-self: flex-end; }
+  .msg .t { font-size: 10.5px; color: var(--faint); margin-top: 4px; text-align: right; }
+
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: 13.5px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; font-weight: 550; }
+  .kv .flag { color: var(--c-await); }
+
+  .actions { padding: 16px 24px; display: flex; gap: 10px; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); }
+  .btn { border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink); font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 15px; border-radius: 8px; cursor: pointer; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { background: var(--accent-ink); }
+
+  @media (max-width: 940px) {
+    .layout { grid-template-columns: 1fr; height: auto; }
+    aside.rail { border-right: none; border-bottom: 1px solid var(--border); }
+    aside.rail .group { display: inline-block; vertical-align: top; margin-right: 18px; }
+    section.list { border-right: none; border-bottom: 1px solid var(--border); max-height: 60vh; }
+    section.detail { min-height: 50vh; }
+  }
+</style>
+
+<div class="demo-note">
+  <strong>Prototype — sample data only.</strong> All names, numbers, and messages below are fictional. No real prospect information is shown. Built to confirm direction before wiring to live lead data.
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="mark">M</div>
+    <div>
+      <h1>Lead Inbox</h1>
+      <div class="sub">Mattgab Leasing · NMFA + Windsong</div>
+    </div>
+  </div>
+  <div class="stats" id="stats"></div>
+  <button class="theme-toggle" id="themeBtn" aria-label="Toggle color theme">◑ Theme</button>
+</header>
+
+<div class="layout">
+  <aside class="rail">
+    <div class="group">
+      <h2>Status</h2>
+      <div id="f-status"></div>
+    </div>
+    <div class="group">
+      <h2>Property</h2>
+      <div id="f-prop"></div>
+    </div>
+    <div class="group">
+      <h2>Source</h2>
+      <div id="f-src"></div>
+    </div>
+  </aside>
+
+  <section class="list">
+    <div class="list-head">
+      <span class="ttl" id="listTitle">All leads</span>
+      <span class="ct" id="listCount"></span>
+    </div>
+    <div class="search">
+      <input id="search" type="text" placeholder="Search name, phone, or message…" aria-label="Search leads" />
+    </div>
+    <div id="cards"></div>
+  </section>
+
+  <section class="detail" id="detail">
+    <div class="detail-empty">
+      <div>
+        <div class="big">✉</div>
+        <div>Select a lead to see the full conversation, AI summary, and contact details.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  // ---- Sample data (fictional) --------------------------------------------
+  const LEADS = [
+    { id:1, name:"Marisol Vega", phone:"(520) 555-0142", email:"", property:"NMFA", source:"Voice AI", status:"new", unread:true, time:"7:42 AM", when:"Today",
+      ai:"Called about a 2-bedroom. Move-in target early August, budget ~$1,300, one small dog. Qualified: income stated 3x rent. Texted tour link, awaiting pick.",
+      thread:[
+        {dir:"in", who:"Marisol", t:"7:41 AM", text:"Hi, do you have any 2 bedrooms coming up in August?"},
+        {dir:"out", who:"AI Agent", t:"7:42 AM", text:"We do! NMFA has 2-bedrooms available. Would you like me to text you a link to book a tour?"},
+        {dir:"in", who:"Marisol", t:"7:42 AM", text:"Yes please"},
+        {dir:"out", who:"AI Agent", t:"7:42 AM", text:"Sent! Check your texts for the tour scheduling link. 🏡"},
+      ] },
+    { id:2, name:"Darnell Foster", phone:"(520) 555-0188", email:"dfoster@example.com", property:"Windsong", source:"Chatbot", status:"await", unread:true, time:"7:15 AM", when:"Today",
+      ai:"Website chat. Interested in 3-bedroom, relocating from Tucson. Asked about pet policy and covered parking. Link sent; no reply yet.",
+      thread:[
+        {dir:"in", who:"Darnell", t:"7:13 AM", text:"What's the pet deposit for a 3 bedroom?"},
+        {dir:"out", who:"AI Agent", t:"7:14 AM", text:"Great question — I'll text you our full pet policy and current 3-bedroom availability. Sound good?"},
+        {dir:"in", who:"Darnell", t:"7:15 AM", text:"sure"},
+        {dir:"out", who:"AI Agent", t:"7:15 AM", text:"Sent! Let me know if you'd like to schedule a tour."},
+      ] },
+    { id:3, name:"Zillow Lead", phone:"(520) 555-0207", email:"", property:"NMFA", source:"Zillow", status:"await", unread:false, time:"Yesterday", when:"Yesterday",
+      ai:null, missingAi:true, dupe:true,
+      thread:[
+        {dir:"in", who:"Prospect", t:"4:02 PM", text:"Is this still available?"},
+      ] },
+    { id:4, name:"Priya Nair", phone:"(520) 555-0119", email:"priya.n@example.com", property:"NMFA", source:"Facebook", status:"replied", unread:false, time:"Yesterday", when:"Yesterday",
+      ai:"Facebook lead. Toured Tuesday, liked unit 214. Asked to start an application; sent application link. Replied that she submitted it.",
+      thread:[
+        {dir:"out", who:"AI Agent", t:"Tue 2:10 PM", text:"Thanks for touring with us! Here's your application link when you're ready."},
+        {dir:"in", who:"Priya", t:"Wed 9:30 AM", text:"Just submitted it, thank you!"},
+        {dir:"out", who:"AI Agent", t:"Wed 9:31 AM", text:"Wonderful — we'll review and reach out shortly. 🎉"},
+      ] },
+    { id:5, name:"Curtis Boone", phone:"(520) 555-0163", email:"", property:"Windsong", source:"Marketplace", status:"new", unread:true, time:"6:58 AM", when:"Today",
+      ai:"Facebook Marketplace listing reply via text-line CTA. Asked about move-in cost on a 2-bedroom. Not yet qualified.",
+      thread:[
+        {dir:"in", who:"Curtis", t:"6:58 AM", text:"Saw your listing — what's total move in on the 2 bed?"},
+      ] },
+    { id:6, name:"Aisha Rahman", phone:"(520) 555-0175", email:"aisha.r@example.com", property:"Windsong", source:"Voice AI", status:"stale", unread:false, time:"5 days ago", when:"Jul 11",
+      ai:"Called about 3-bedroom pricing. Qualified and interested but never picked a tour time. No follow-up in 5 days — good candidate for a nudge text.",
+      thread:[
+        {dir:"in", who:"Aisha", t:"Jul 11 1:20 PM", text:"What's the rent on a 3 bedroom?"},
+        {dir:"out", who:"AI Agent", t:"Jul 11 1:21 PM", text:"I'll text you current 3-bedroom pricing and a tour link. Okay to text you?"},
+        {dir:"in", who:"Aisha", t:"Jul 11 1:21 PM", text:"yes"},
+      ] },
+    { id:7, name:"Zillow Lead", phone:"", email:"", property:"Windsong", source:"Zillow", status:"new", unread:true, time:"Today", when:"Today",
+      ai:null, missingAi:true, dupe:true,
+      thread:[
+        {dir:"in", who:"Prospect", t:"8:05 AM", text:"Hi, interested in your 2 bedroom."},
+      ] },
+    { id:8, name:"Gabriel Ortiz", phone:"(520) 555-0134", email:"g.ortiz@example.com", property:"NMFA", source:"Chatbot", status:"replied", unread:false, time:"2 days ago", when:"Jul 14",
+      ai:"Website chat. Asked about the 6-month lease special. Sent concession details; replied he'd discuss with roommate.",
+      thread:[
+        {dir:"in", who:"Gabriel", t:"Jul 14 11:00 AM", text:"Do you offer a 6 month lease?"},
+        {dir:"out", who:"AI Agent", t:"Jul 14 11:01 AM", text:"We do — I'll text you the details on our 6-month term and current specials."},
+        {dir:"in", who:"Gabriel", t:"Jul 14 3:44 PM", text:"Thanks, will talk to my roommate and get back to you"},
+      ] },
+  ];
+
+  // ---- State ---------------------------------------------------------------
+  const STATUS = { new:{label:"New",color:"var(--c-new)"}, await:{label:"Awaiting reply",color:"var(--c-await)"}, replied:{label:"Replied",color:"var(--c-replied)"}, stale:{label:"Stale",color:"var(--c-stale)"} };
+  const STATUS_CLASS = { new:"st-new", await:"st-await", replied:"st-replied", stale:"st-stale" };
+  let filters = { status:"all", property:"all", source:"all" };
+  let query = "";
+  let selectedId = null;
+
+  const el = id => document.getElementById(id);
+
+  function counts(key, val, base) {
+    return base.filter(l => l[key] === val).length;
+  }
+
+  function activeList() {
+    return LEADS.filter(l =>
+      (filters.status === "all" || l.status === filters.status) &&
+      (filters.property === "all" || l.property === filters.property) &&
+      (filters.source === "all" || l.source === filters.source) &&
+      (query === "" ||
+        (l.name + " " + (l.phone||"") + " " + l.thread.map(m=>m.text).join(" ")).toLowerCase().includes(query))
+    );
+  }
+
+  function renderStats() {
+    const s = [
+      { n: LEADS.filter(l=>l.status==="new").length, l:"New", cls:"accent" },
+      { n: LEADS.filter(l=>l.status==="await").length, l:"Awaiting reply", cls:"await" },
+      { n: LEADS.filter(l=>l.status==="replied").length, l:"Replied", cls:"" },
+      { n: LEADS.filter(l=>l.status==="stale").length, l:"Stale", cls:"stale" },
+    ];
+    el("stats").innerHTML = s.map(x =>
+      `<div class="stat ${x.cls}"><div class="n">${x.n}</div><div class="l">${x.l}</div></div>`).join("");
+  }
+
+  function renderFilters() {
+    // status
+    const statuses = ["all","new","await","replied","stale"];
+    el("f-status").innerHTML = statuses.map(st => {
+      const label = st==="all" ? "All statuses" : STATUS[st].label;
+      const cnt = st==="all" ? LEADS.length : counts("status", st, LEADS);
+      const dot = st==="all" ? "" : `<span class="dot" style="background:${STATUS[st].color}"></span>`;
+      return `<button class="filt ${filters.status===st?'active':''}" data-k="status" data-v="${st}">
+        <span>${dot}${label}</span><span class="cnt">${cnt}</span></button>`;
+    }).join("");
+
+    const props = ["all","NMFA","Windsong"];
+    el("f-prop").innerHTML = props.map(p => {
+      const cnt = p==="all" ? LEADS.length : counts("property", p, LEADS);
+      return `<button class="filt ${filters.property===p?'active':''}" data-k="property" data-v="${p}">
+        <span>${p==="all"?"All properties":p}</span><span class="cnt">${cnt}</span></button>`;
+    }).join("");
+
+    const srcs = ["all", ...Array.from(new Set(LEADS.map(l=>l.source)))];
+    el("f-src").innerHTML = srcs.map(sc => {
+      const cnt = sc==="all" ? LEADS.length : counts("source", sc, LEADS);
+      return `<button class="filt ${filters.source===sc?'active':''}" data-k="source" data-v="${sc}">
+        <span>${sc==="all"?"All sources":sc}</span><span class="cnt">${cnt}</span></button>`;
+    }).join("");
+
+    document.querySelectorAll(".filt").forEach(b => b.onclick = () => {
+      filters[b.dataset.k] = b.dataset.v;
+      renderAll();
+    });
+  }
+
+  function cardHTML(l) {
+    const prev = l.thread[l.thread.length-1].text;
+    const stClass = STATUS_CLASS[l.status];
+    const stLabel = STATUS[l.status].label;
+    const warn = l.missingAi ? `<span class="warn-flag">⚠ No AI summary</span>` : "";
+    return `<button class="card ${l.unread?'unread':''} ${selectedId===l.id?'sel':''}" data-id="${l.id}">
+      <div class="row1">
+        <span class="name">${l.name}</span>
+        <span class="time">${l.time}</span>
+      </div>
+      <div class="prev">${prev}</div>
+      <div class="meta">
+        <span class="chip ${stClass}"><span class="dot" style="background:${STATUS[l.status].color}"></span>${stLabel}</span>
+        <span class="chip prop">${l.property}</span>
+        <span class="chip src">${l.source}</span>
+        ${warn}
+      </div>
+    </button>`;
+  }
+
+  function renderList() {
+    const list = activeList();
+    el("cards").innerHTML = list.length
+      ? list.map(cardHTML).join("")
+      : `<div style="padding:40px 16px;text-align:center;color:var(--faint);font-size:14px">No leads match these filters.</div>`;
+    el("listCount").textContent = `${list.length} ${list.length===1?'lead':'leads'}`;
+    const parts = [];
+    if (filters.status!=="all") parts.push(STATUS[filters.status].label);
+    if (filters.property!=="all") parts.push(filters.property);
+    if (filters.source!=="all") parts.push(filters.source);
+    el("listTitle").textContent = parts.length ? parts.join(" · ") : "All leads";
+    document.querySelectorAll(".card").forEach(c => c.onclick = () => selectLead(+c.dataset.id));
+  }
+
+  function selectLead(id) {
+    selectedId = id;
+    const l = LEADS.find(x => x.id === id);
+    if (l) l.unread = false;
+    renderStats();
+    renderFilters();
+    renderList();
+    renderDetail(l);
+  }
+
+  function renderDetail(l) {
+    if (!l) return;
+    const aiBlock = l.missingAi
+      ? `<div class="ai-summary missing">⚠ No AI summary was recorded for this lead — the auto-reply may not have fired. Worth a manual check.</div>`
+      : `<div class="ai-summary">${l.ai}</div>`;
+
+    const thread = l.thread.map(m => `
+      <div class="msg ${m.dir}">
+        <div class="who">${m.who}</div>
+        <div>${m.text}</div>
+        <div class="t">${m.t}</div>
+      </div>`).join("");
+
+    const phoneCell = l.phone
+      ? `<a href="tel:${l.phone.replace(/[^0-9]/g,'')}">${l.phone}</a>`
+      : `<span class="flag">⚠ Not captured</span>`;
+    const emailCell = l.email
+      ? `<a href="mailto:${l.email}">${l.email}</a>`
+      : `<span style="color:var(--faint)">—</span>`;
+    const dupeRow = l.dupe
+      ? `<dt>Data note</dt><dd class="flag">⚠ Possible duplicate row (Zillow)</dd>` : "";
+
+    el("detail").innerHTML = `
+      <div class="dhead">
+        <div class="top">
+          <div>
+            <h3>${l.name}</h3>
+            <div class="contact">
+              <span>📞 ${phoneCell}</span>
+              <span>✉ ${emailCell}</span>
+            </div>
+          </div>
+          <span class="chip ${STATUS_CLASS[l.status]}"><span class="dot" style="background:${STATUS[l.status].color}"></span>${STATUS[l.status].label}</span>
+        </div>
+        <div class="dmeta">
+          <span class="chip prop">${l.property}</span>
+          <span class="chip src">${l.source}</span>
+          <span class="chip prop">${l.when}</span>
+        </div>
+      </div>
+
+      <div class="dsection">
+        <h4>AI Summary</h4>
+        ${aiBlock}
+      </div>
+
+      <div class="dsection">
+        <h4>Conversation</h4>
+        <div class="thread">${thread}</div>
+      </div>
+
+      <div class="dsection">
+        <h4>Lead details</h4>
+        <dl class="kv">
+          <dt>Source</dt><dd>${l.source}</dd>
+          <dt>Property</dt><dd>${l.property}</dd>
+          <dt>Phone</dt><dd>${l.phone || '<span class="flag">Not captured</span>'}</dd>
+          <dt>First seen</dt><dd>${l.when}, ${l.time}</dd>
+          ${dupeRow}
+        </dl>
+      </div>
+
+      <div class="actions">
+        <button class="btn primary">Reply</button>
+        <button class="btn">Mark contacted</button>
+        <button class="btn">Assign to…</button>
+      </div>`;
+  }
+
+  function renderAll() { renderStats(); renderFilters(); renderList(); }
+
+  el("search").addEventListener("input", e => { query = e.target.value.trim().toLowerCase(); renderList(); });
+
+  // theme toggle
+  el("themeBtn").onclick = () => {
+    const root = document.documentElement;
+    const cur = root.getAttribute("data-theme");
+    const isDark = cur ? cur === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.setAttribute("data-theme", isDark ? "light" : "dark");
+  };
+
+  renderAll();
+</script>
