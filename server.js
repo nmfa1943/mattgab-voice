@@ -108,11 +108,11 @@ const DEFAULT_CONTENT = {
     windsong: {
       hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
       hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
-      units_note: 'NOTE: Windsong has 2-bedrooms and 3-bedrooms only. There are no 1-bedroom units at Windsong, and our 1-bedrooms at North Mountain Foothills are temporarily unavailable right now. Windsong pricing is a standard move-in special.',
+      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now only 3-bedrooms are AVAILABLE; 1-bedrooms and 2-bedrooms are all leased, so never offer either for a tour or application. Windsong pricing is a standard move-in special.',
       unit_types: {
-        '1br': { status: 'not_offered' },
+        '1br': { status: 'not_available', quotable: false },
         '2br': {
-          status: 'available', quotable: true,
+          status: 'not_available', quotable: false,
           base_spoken: 'nine ninety five', base_spoken_alt: 'nine hundred ninety five', base_num: 995,
           utils_spoken: 'twelve ninety five', utils_num: 1295,
           movein_total_spoken: 'fourteen hundred', movein_total_spoken_es: 'mil cuatrocientos', movein_total_num: 1400,
@@ -145,10 +145,12 @@ function validateContent(d) {
       for (const ut of Object.values(p.unit_types)) {
         if (!ut || typeof ut.status !== 'string') return false;
         if (ut.quotable) {
-          // Every quotable unit must carry a spoken base price, and no live
-          // spoken price may be one of the retired/obsolete figures.
+          // Every quotable unit must carry SOME spoken price - either a base
+          // rate or an all-in rate. Units like NMFA's 3-bedroom legitimately
+          // have only an all-in figure. No live spoken price may be one of the
+          // retired/obsolete figures.
           const spokens = [ut.base_spoken, ut.base_spoken_alt, ut.utils_spoken, ut.std12_utils_spoken, ut.movein_total_spoken].filter(Boolean);
-          if (!ut.base_spoken) return false;
+          if (!ut.base_spoken && !ut.utils_spoken) return false;
           for (const s of spokens) if (obsolete.has(s)) return false;
         }
       }
@@ -232,7 +234,7 @@ ${property.key === 'nmfa' ? `- THIS LINE IS NMFA. Right now a 2-bedroom AND a 3-
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
-- If the caller says they saw a lower price or "nine ninety five": "That nine ninety five is our one-bedroom, and those aren't available right now. Our two-bedroom is twelve ninety five a month, all utilities included." Then pivot to the tour.
+- If the caller says they saw a lower price or "nine ninety five": that is our one-bedroom, all utilities included, and one-bedrooms are NOT available at either property right now. Say that, then give the all-in price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour. NEVER offer or price a unit that is not AVAILABLE NOW.
 
 MOVE-IN COST:
 - "All utilities included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.
@@ -246,6 +248,8 @@ ${property.key === 'nmfa' ? `- This line is North Mountain Foothills (NMFA). NMF
 - The NMFA 3-bedroom is eighteen hundred a month, all utilities included, and is AVAILABLE now. Offer it for a tour just like the 2-bedroom.` : `- This line is Windsong. Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, only 3-bedrooms are AVAILABLE; 1-bedrooms and 2-bedrooms are all leased.
 - If the caller asks about a 1-bedroom or 2-bedroom, tell them it is not available right now and offer the available three-bedroom or the office line: "Our one and two-bedrooms are all leased right now. We do have a three-bedroom available at ${WS3.utils_spoken} a month, all utilities included. Want me to text you the tour link, or share the office number?"`}
 - NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.
+- TOUR LINK GATE: only send a tour link for a bedroom count the caller asked for, or explicitly agreed to BY BEDROOM COUNT. A vague "okay" or "sure" right after you pivoted them to a different unit type is NOT agreement to that unit type. Confirm first: "Just so I book the right one, the three-bedroom is what I would be showing you. Does that work?" If they do not clearly say yes to that bedroom count, do NOT send the link.
+- If the caller named a bedroom count and the only AVAILABLE unit is two or more bedroom counts away from it (for example they want a one-bedroom and only a three-bedroom is open), LEAD with the waiting list. Mention the available unit once, with its price, and do not push the tour.
 - WAITLIST: when the caller still wants a unit type that is NOT available now: first warmly offer the AVAILABLE unit and its all-in price. If the caller is not interested and stays set on the type we do not have, offer the waiting list. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure; you may still offer to text the tour link for the available unit or share the office number.
 
 CONDITIONS:
