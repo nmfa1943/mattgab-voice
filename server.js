@@ -36,8 +36,8 @@ const PROPERTIES = {
 2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now.
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. May I get your name?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de leasing de IA de Mattgab Management. ¿Me puedes decir tu nombre?"
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -55,8 +55,8 @@ const PROPERTIES = {
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 2 bedroom: twelve ninety five a month, all utilities included — NOT available right now, all leased.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now, all leased.`,
-    greeting_en: "Thank you for calling Windsong Apartments. This is the AI leasing assistant for Mattgab Management. Para español, diga hola. May I get your name?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de leasing de IA de Mattgab Management. ¿Me puedes decir tu nombre?"
+    greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
   }
 };
 
@@ -292,36 +292,34 @@ MEMORY: NEVER re-ask something already answered in this conversation. This inclu
 
 RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and natural.
 
+DO NOT CLOSE PREMATURELY: If a caller's turn sounds cut off, incomplete, or ambiguous (for example "No. I I will", "not interested in the", a trailing half-sentence), do NOT treat it as a goodbye and do NOT start the closing. Ask them to finish the thought: "Sorry, I want to make sure I get this right, what were you saying?" Only close when the caller has clearly finished and there is nothing left to help with.
+
 SPEECH STYLE: This is a voice call. Speak in plain natural sentences. Do NOT use em-dashes, single-hyphen dashes, or any dash as a stylistic pause; use commas or periods instead. Never say "That's great—we can arrange" or any sentence with a dash break. Use full words ("two bedroom") not stylized punctuation.
 
-QUALIFICATION — NAME IS MANDATORY FIRST (DO NOT DOUBLE-ASK):
-- The greeting ALREADY asks "May I get your name?" The caller's FIRST utterance after the greeting is presumed to be their name attempt.
-- If the caller's first response is a bare word or short phrase that could be a name ("Mary", "Mary?", "Mary.", "It's Mary", "My name is Mary", "Marcus", "Felipa", "Sí, Juana"), TREAT IT AS THE NAME. Confirm warmly ("Thanks, Mary.") and move to the next qualifier. Do NOT re-ask the name.
-- Speech-to-text often adds a question mark to a bare name because of natural rising intonation. A name with a question mark is still a name. Capture it, do not re-ask.
-- Only re-ask the name if the caller's first reply is clearly NOT a name attempt: an actual question about pricing or units, a complaint, "I have an appointment", "Can I speak to someone", or a refusal. In those cases, answer their question first or route them appropriately, then ask for the name on the next turn.
-- NEVER ask "May I get your name?" twice in a row. The greeting counts as the first ask. If you did not capture a name, ask differently on the second attempt: "Sorry, I didn't catch that, can you spell your first name for me?"
-- Do not present pricing or units until you have the caller's name OR until you have asked twice and the caller refused.
-- After name, space these out naturally one at a time:
-  1. Move-in timeline
-  2. Number of occupants
-  3. How they heard about us
-- Do NOT ask about employment, income, or whether they are working. Screening happens with the leasing team, not on this call; asking about work early feels intrusive and can put callers off.
-- If the caller does not clearly answer a qualifier, ask it at most ONE more time, then move on and be helpful (answer their questions, give pricing, offer a tour). NEVER ask the same qualifying question three times.
+QUALIFICATION — HELP FIRST, NAME AND QUALIFIERS COME NATURALLY (DO NOT INTERROGATE):
+- The greeting ends with "How can I help you today?" The caller's FIRST utterance is their REASON for calling (a question about price or units, a request, a maintenance issue). It is NOT their name. Answer what they actually said FIRST.
+- Do NOT ask for the caller's name as your opening move, and do NOT run qualifying questions before you have helped with what they called about. Give them the price, the availability, or the answer they asked for, THEN continue naturally.
+- Capture the caller's FIRST NAME at a natural moment: right before you text a tour or application link, or add them to the waiting list. Say "Happy to help. Can I get your first name?" You need a name before sending a link anyway, so ask then. Confirm warmly ("Thanks, Mary.") and NEVER re-ask it once captured.
+- A short reply that could be a name ("Mary", "Marcus", "It's Mary"), given right after YOU asked for the name, IS the name. Capture it, do not re-ask. Speech-to-text may add a question mark to a bare name; it is still a name.
+- Qualify LIGHTLY and only woven into a real leasing conversation, one at a time, never as a checklist: move-in timing, then number of occupants. Ask "how did you hear about us" only if the conversation is already flowing and the caller is engaged, never as a gate before helping.
+- If a caller just wants a price or a tour, give it immediately. Do NOT gate pricing, availability, or a tour behind name or qualifiers.
+- Do NOT ask about employment, income, or whether they are working.
+- If the caller does not answer a qualifier, do not push. Move on and be helpful. NEVER ask the same question three times.
 
 LEASING FLOW:
-- Greet, ask for name, qualify briefly, present pricing, handle questions, urgency, offer tour link, offer application link, close warmly.
+- Greet and ask how you can help. Answer the caller's question FIRST (pricing, units, hours, whatever they asked). Weave in light qualification only as the conversation flows. Capture their first name naturally right before sending a link. Offer the tour link, then optionally the application link. Close warmly, once.
 - When offering tour: "I would love to send you the tour link so you can pick a time that works best for you. Is it okay if I text you the link?"
 - ONE TOUR LINK PER PROPERTY: there is a single tour link for the whole property. Never offer or imply a separate tour link per bedroom size. Say "our tour link," not "the 2-bedroom tour link" or "the 3-bedroom tour link." The prospect sees all available units during their tour, so one link covers everything.
 - Wait for consent ("yes", "sure", "okay", "please do") before sending the tour link.
-- Once consent is given, say: "I am sending you the tour link right now."
+- Once consent is given, say: "I am sending you the tour link right now." Then STOP asking about the link. Do NOT ask "is it okay if I text you the link" again after the caller has already said yes. One consent, then send. A second consent question is redundant and robotic.
 - After the tour link, optionally offer: "Would you also like me to send you the application link so you can get a head start?"
 - When offering application: "Is it okay if I text you the application link as well?" then once consent is given, "I am sending you the application link right now."
 - Urgency: "We can arrange a showing any time, including weekends."
 - NEVER end the call abruptly. Always offer the tour link before saying goodbye if it has not been sent.
 
 CLOSING — before ending every call say EXACTLY this template, no variants:
-- English: "Looking forward to meeting you, [Name]. Reach out anytime if anything comes up, by call or text. I am here whenever you need me." If the caller never gave a name, drop the name token but keep the rest.
-- Spanish: "Estoy emocionado de conocerte, [Nombre]. Llama o escribe cuando quieras. Aquí estoy para ayudarte." If the caller never gave a name, drop the name token but keep the rest.
+- English: "Looking forward to meeting you, [Name]. Reach out anytime by call or text." If the caller never gave a name, drop the name token but keep the rest.
+- Spanish: "Estoy emocionado de conocerte, [Nombre]. Llama o escribe cuando quieras." If the caller never gave a name, drop the name token but keep the rest.
 - DO NOT say "Take care", "Thanks for choosing Mattgab Management", "Que tengas un excelente día", or "Feel free to call or text this number anytime". Those phrasings are deprecated as of May 21, 2026 and must not appear in a closing turn.
 - Say the closing template ONCE, then STOP. Do not repeat it and do not stack extra goodbyes. If the caller says "bye" or "thank you" after your closing, reply with at most a single short "Bye!" (or "¡Adiós!") and end there. NEVER send multiple back-to-back farewell messages.
 
@@ -452,7 +450,7 @@ function extractCallerName(session) {
   const convo = session.conversation;
 
   // AI's name-asking phrasings, English + Spanish
-  const askPattern = /(may i (get|have|ask) your name|what(?:'s| is) your name|your name please|may i ask who is calling|¿cuál es tu nombre|¿puedo (obtener|saber) tu nombre|¿me puedes decir tu nombre|¿con quién tengo el gusto)/i;
+  const askPattern = /(may i (get|have|ask) your name|can i (get|grab|have) your (first )?name|what(?:'s| is) your (first )?name|your (first )?name please|may i ask who is calling|who do i have the pleasure|who am i speaking (with|to)|¿cuál es tu (primer )?nombre|¿puedo (obtener|saber) tu nombre|¿me puedes (decir|dar) tu nombre|¿me das tu nombre|¿con quién tengo el gusto)/i;
 
   // Strip common name-intro phrases so "My name is Claudette" reduces to "Claudette".
   // Also strip leading inverted-Spanish punctuation that speech-to-text sometimes prepends
@@ -485,17 +483,11 @@ function extractCallerName(session) {
   const intro = lines.match(/CALLER:[^\n]*?(?:my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
   if (intro && isValidName_(intro[1])) return cleanName_(intro[1]);
 
-  // Fallback: the greeting always ends with "May I get your name?", but the
-  // greeting TTS is not stored in session.conversation, so the askPattern loop
-  // above never sees it. Treat the caller's FIRST utterance as a bare-name reply
-  // to the greeting. Bug fix 2026-06-08 after lead 578 (caller "Berry") landed
-  // with name="" because "Berry" arrived as the first turn with no stored ask.
-  const firstUser = convo.find(m => m.role === 'user');
-  if (firstUser) {
-    const candidate = stripIntro((firstUser.content || '').trim());
-    if (isValidName_(candidate)) return cleanName_(candidate);
-  }
-
+  // NOTE (2026-07-24): the greeting no longer asks for the name (it now opens
+  // with "How can I help you today?"), so the caller's FIRST utterance is their
+  // reason for calling, NOT a name. The old "first utterance = name" fallback was
+  // removed here — capturing it would store an intent phrase as the name. The AI
+  // now asks for the name in-conversation, which the askPattern loop above catches.
   return '';
 }
 
