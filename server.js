@@ -53,7 +53,7 @@ const PROPERTIES = {
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
     units: `
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
-2 bedroom: twelve ninety five a month, all utilities included — NOT available right now, all leased.
+2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now, all leased.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
@@ -108,7 +108,7 @@ const DEFAULT_CONTENT = {
     windsong: {
       hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
       hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
-      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now only 3-bedrooms are AVAILABLE; 1-bedrooms and 2-bedrooms are all leased, so never offer either for a tour or application. Windsong pricing is a standard move-in special.',
+      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE; 1-bedrooms are all leased, so never offer a 1-bedroom for a tour or application. Windsong pricing is a standard move-in special.',
       unit_types: {
         '1br': { status: 'not_available', quotable: false },
         '2br': {
@@ -192,7 +192,7 @@ function renderUnitsBlock(key, content) {
   if (key === 'nmfa') {
     return `\n2 bedroom: ${twoBR} a month, all utilities included (electric, water, sewer, and trash). ${p.unit_types['2br'].sqft_line}. AVAILABLE NOW.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now.\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`;
   }
-  return `\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.\n2 bedroom: ${twoBR} a month, all utilities included — NOT available right now, all leased.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now, all leased.`;
+  return `\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.\n2 bedroom: ${twoBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now, all leased.`;
 }
 
 // ============================================================
@@ -236,9 +236,9 @@ PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
 ${property.key === 'nmfa' ? `- THIS LINE IS NMFA. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE. 1-bedrooms exist but are NOT available.
 - 2 bedroom: "${NM2.utils_spoken} a month, all utilities included." AVAILABLE NOW — this is the unit to offer for a tour.
 - 1 bedroom: say "${nm1p} a month" ONLY as "our one-bedroom, which isn't available right now." Never offer it for a tour or application.
-- 3 bedroom: "${nm3p} a month, all utilities included." AVAILABLE NOW — offer it for a tour just like the 2-bedroom.` : `- THIS LINE IS WINDSONG. Only 3-bedrooms are AVAILABLE right now. 2-bedrooms and 1-bedrooms exist but are NOT available (all leased).
-- 3 bedroom: "${WS3.utils_spoken} a month, all utilities included." AVAILABLE NOW — this is the unit to offer for a tour.
-- 2 bedroom: say "${ws2p} a month, all utilities included" ONLY as "not available right now, all leased." Never offer it for a tour.
+- 3 bedroom: "${nm3p} a month, all utilities included." AVAILABLE NOW — offer it for a tour just like the 2-bedroom.` : `- THIS LINE IS WINDSONG. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE. 1-bedrooms exist but are NOT available (all leased).
+- 2 bedroom: "${ws2p} a month, all utilities included." AVAILABLE NOW — this is the unit to offer for a tour.
+- 3 bedroom: "${WS3.utils_spoken} a month, all utilities included." AVAILABLE NOW — offer it for a tour just like the 2-bedroom.
 - 1 bedroom: say "${ws1p} a month" ONLY as "not available right now, all leased." Never offer it.`}
 - After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
@@ -255,8 +255,8 @@ MOVE-IN COST:
 CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 ${property.key === 'nmfa' ? `- This line is North Mountain Foothills (NMFA). NMFA has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, a 2-bedroom AND a 3-bedroom are AVAILABLE (1-bedrooms are not available).
 - If the caller asks about a 3 bedroom, offer the NMFA three-bedroom: "We do have a three-bedroom available here at North Mountain Foothills for ${nm3p} a month, all utilities included. Want me to text you the tour link so you can come see it?"
-- The NMFA 3-bedroom is ${nm3p} a month, all utilities included, and is AVAILABLE now. Offer it for a tour just like the 2-bedroom.` : `- This line is Windsong. Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, only 3-bedrooms are AVAILABLE; 1-bedrooms and 2-bedrooms are all leased.
-- If the caller asks about a 1-bedroom or 2-bedroom, tell them it is not available right now and offer the available three-bedroom or the office line: "Our one and two-bedrooms are all leased right now. We do have a three-bedroom available at ${WS3.utils_spoken} a month, all utilities included. Want me to text you the tour link, or share the office number?"`}
+- The NMFA 3-bedroom is ${nm3p} a month, all utilities included, and is AVAILABLE now. Offer it for a tour just like the 2-bedroom.` : `- This line is Windsong. Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, a 2-bedroom AND a 3-bedroom are AVAILABLE; 1-bedrooms are all leased.
+- If the caller asks about a 2-bedroom or 3-bedroom, offer it for a tour. If the caller asks about a 1-bedroom, tell them it is not available right now and offer the available two-bedroom or three-bedroom: "Our one-bedrooms are all leased right now. We do have a two-bedroom available at ${ws2p} a month and a three-bedroom at ${WS3.utils_spoken} a month, all utilities included. Want me to text you the tour link, or share the office number?"`}
 - NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.
 - TOUR LINK GATE: only send a tour link for a bedroom count the caller asked for, or explicitly agreed to BY BEDROOM COUNT. A vague "okay" or "sure" right after you pivoted them to a different unit type is NOT agreement to that unit type. Confirm first: "Just so I book the right one, the three-bedroom is what I would be showing you. Does that work?" If they do not clearly say yes to that bedroom count, do NOT send the link.
 - If the caller named a bedroom count and the only AVAILABLE unit is two or more bedroom counts away from it (for example they want a one-bedroom and only a three-bedroom is open), LEAD with the waiting list. Mention the available unit once, with its price, and do not push the tour.
@@ -401,7 +401,7 @@ RULES
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
-- Write all prices as full words. ${property.key === 'nmfa' ? `Valid all-in MONTHLY figures on THIS NMFA line: "${NM2.utils_spoken}" (2-bedroom, all utilities included — AVAILABLE now) and "${nm1p}" (1-bedroom, all utilities included — NOT available; say only as "our one-bedroom, not available right now"). The 3-bedroom is "${nm3p}" (all utilities included, AVAILABLE now).` : `Valid all-in MONTHLY figures on THIS Windsong line: "${WS3.utils_spoken}" (3-bedroom, all utilities included — the only AVAILABLE unit), "${ws2p}" (2-bedroom, all utilities included — NOT available, all leased), and "${ws1p}" (1-bedroom, all utilities included — NOT available, all leased).`} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
+- Write all prices as full words. ${property.key === 'nmfa' ? `Valid all-in MONTHLY figures on THIS NMFA line: "${NM2.utils_spoken}" (2-bedroom, all utilities included — AVAILABLE now) and "${nm1p}" (1-bedroom, all utilities included — NOT available; say only as "our one-bedroom, not available right now"). The 3-bedroom is "${nm3p}" (all utilities included, AVAILABLE now).` : `Valid all-in MONTHLY figures on THIS Windsong line: "${WS3.utils_spoken}" (3-bedroom, all utilities included — AVAILABLE now), "${ws2p}" (2-bedroom, all utilities included — AVAILABLE now), and "${ws1p}" (1-bedroom, all utilities included — NOT available, all leased).`} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
 - Write all numbers as words when speaking about prices.
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
