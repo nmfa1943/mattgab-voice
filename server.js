@@ -35,7 +35,7 @@ const PROPERTIES = {
     units: `
 2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now.
-3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
+3 bedroom: seventeen fifty a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
   },
@@ -52,7 +52,7 @@ const PROPERTIES = {
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
     units: `
-3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
+3 bedroom: seventeen fifty a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now, all leased.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
@@ -84,13 +84,13 @@ const CONTENT_TTL_MS  = 60 * 1000; // re-check the store at most once a minute
 const DEFAULT_CONTENT = {
   meta: { version: 0, effective_date: 'baseline', updated_by: 'DEFAULT_CONTENT' },
   utilities_line: 'ALL UTILITIES INCLUDED IN RENT.',
-  obsolete_figures: ['ten fifty', 'eleven hundred', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty', 'seventeen fifty'],
+  obsolete_figures: ['ten fifty', 'eleven hundred', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty'],
   obsolete_figures_pronunciation_extra: ['twelve hundred ninety five'],
   properties: {
     nmfa: {
       hours_en: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
       hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
-      units_note: 'NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms are temporarily unavailable, so do not quote a 1-bedroom price or move-in; if asked, say our 1-bedrooms are temporarily unavailable and we have 2-bedrooms ready now. NMFA also has a 3-bedroom AVAILABLE right now at eighteen hundred a month, all utilities included.',
+      units_note: 'NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms are temporarily unavailable, so do not quote a 1-bedroom price or move-in; if asked, say our 1-bedrooms are temporarily unavailable and we have 2-bedrooms ready now. NMFA also has a 3-bedroom AVAILABLE right now at seventeen fifty a month, all utilities included.',
       unit_types: {
         '1br': { status: 'temporarily_unavailable', quotable: false },
         '2br': {
@@ -121,7 +121,7 @@ const DEFAULT_CONTENT = {
         '3br': {
           status: 'available', quotable: true,
           base_spoken: 'fifteen hundred', base_num: 1500,
-          utils_spoken: 'eighteen hundred', utils_num: 1800,
+          utils_spoken: 'seventeen fifty', utils_num: 1750,
           movein_total_spoken: 'sixteen hundred fifty', movein_total_spoken_es: 'mil seiscientos cincuenta', movein_total_num: 1650,
           movein_deposit_num: 900, movein_first_num: 750
         }
@@ -188,7 +188,7 @@ function renderUnitsBlock(key, content) {
   // All-in spoken price per unit, read from content; fall back to the historical
   // literal if the store lacks it (behavior-preserving).
   const sp = (u, fb) => (p.unit_types[u] && p.unit_types[u].utils_spoken) ? p.unit_types[u].utils_spoken : fb;
-  const oneBR = sp('1br', 'nine ninety five'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'eighteen hundred');
+  const oneBR = sp('1br', 'nine ninety five'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'seventeen fifty');
   if (key === 'nmfa') {
     return `\n2 bedroom: ${twoBR} a month, all utilities included (electric, water, sewer, and trash). ${p.unit_types['2br'].sqft_line}. AVAILABLE NOW.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now.\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`;
   }
@@ -214,8 +214,8 @@ function buildSystemPrompt(property, content) {
   const NM3 = CC.properties.nmfa.unit_types['3br'] || {};
   const WS1 = CC.properties.windsong.unit_types['1br'] || {};
   const spk = (u, fb) => (u && u.utils_spoken) ? u.utils_spoken : fb;
-  const nm1p = spk(NM1, 'nine ninety five'), nm2p = spk(NM2, 'twelve ninety five'), nm3p = spk(NM3, 'eighteen hundred');
-  const ws1p = spk(WS1, 'nine ninety five'), ws2p = spk(WS2, 'twelve ninety five'), ws3p = spk(WS3, 'eighteen hundred');
+  const nm1p = spk(NM1, 'nine ninety five'), nm2p = spk(NM2, 'twelve ninety five'), nm3p = spk(NM3, 'seventeen fifty');
+  const ws1p = spk(WS1, 'nine ninety five'), ws2p = spk(WS2, 'twelve ninety five'), ws3p = spk(WS3, 'seventeen fifty');
   const OBS  = CC.obsolete_figures || [];
   const OBSX = CC.obsolete_figures_pronunciation_extra || [];
   // "a", "b", or "c"  — matches the exact prose format used in the prompt.
