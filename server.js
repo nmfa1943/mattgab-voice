@@ -404,6 +404,7 @@ PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
 - Write all prices as full words. ${property.key === 'nmfa' ? `Valid all-in MONTHLY figures on THIS NMFA line: "${NM2.utils_spoken}" (2-bedroom, all utilities included — AVAILABLE now) and "${nm1p}" (1-bedroom, all utilities included — NOT available; say only as "our one-bedroom, not available right now"). The 3-bedroom is "${nm3p}" (all utilities included, AVAILABLE now).` : `Valid all-in MONTHLY figures on THIS Windsong line: "${WS3.utils_spoken}" (3-bedroom, all utilities included — AVAILABLE now), "${ws2p}" (2-bedroom, all utilities included — AVAILABLE now), and "${ws1p}" (1-bedroom, all utilities included — NOT available, all leased).`} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
 - Write all numbers as words when speaking about prices.
+- PRICE READBACK CORRECTION: if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is one thousand two hundred ninety five dollars a month, all utilities included." Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting, continue naturally with the tour offer.
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
 }
@@ -563,9 +564,13 @@ async function generateCallSummary(session) {
 
 "summary" must be 2 to 3 sentences. Cover: who called, what they wanted, what was discussed (price, tour, application, hours, etc.), and any commitment made (tour link sent, application link sent, callback expected). Be specific. Use the caller's name if known. Do not include filler.
 
+PRICES IN THE SUMMARY: the transcript contains prices spoken as words. Convert each to its correct dollar figure: "nine ninety five" is $995, "eleven hundred" is $1,100, "twelve ninety five" is $1,295, "fourteen hundred" is $1,400, "fifteen hundred" is $1,500, "sixteen hundred fifty" is $1,650, "seventeen fifty" is $1,750, "eighteen hundred" is $1,800, "one thousand" is $1,000. The same figures may appear spelled out in full ("one thousand, two hundred ninety five dollars"); treat those identically. NEVER write a monthly rent or deposit as a cents or decimal amount such as $12.95 or $17.50; those are wrong by a factor of one hundred. If the caller stated a price that conflicts with what the AI said, record the AI figure, never the caller figure.
+
 "action" must be ONE short sentence describing what the human leasing agent should do next. Examples: "Send tour link via text", "Follow up tomorrow to confirm tour booking", "Add to waitlist for 2 bedroom", "No follow-up needed — caller declined", "Verify Section 8 voucher status before tour", "Confirm move-in date and start application".
 
-If the call was a wrong number, a hang-up, or had no real intent, set summary to "Brief call with no clear leasing intent" and action to "No follow-up needed".
+If the call was clearly a wrong number, or the caller explicitly declined help, set summary to "Brief call with no clear leasing intent" and action to "No follow-up needed".
+
+If the caller engaged at all but the call ended WITHOUT a captured name AND WITHOUT an established reason for calling (for example a one-word reply and then silence, or a dropped call after the greeting), do NOT use "No follow-up needed". Set action to "Unresolved, no information captured, call this number back" and state plainly in the summary that nothing was captured. A caller who reached us and got nothing is an open follow-up, not a closed call.
 
 Caller: ${callerName}
 Property: ${propertyName}
