@@ -472,7 +472,7 @@ function extractCallerName(session) {
     if (!askPattern.test(m.content || '')) continue;
     for (let j = i + 1; j < convo.length; j++) {
       if (convo[j].role === 'user') {
-        const candidate = stripIntro((convo[j].content || '').trim());
+        const candidate = unspell_(stripIntro((convo[j].content || '').trim()));
         if (isValidName_(candidate)) return cleanName_(candidate);
         break; // move on; try the next AI ask
       }
@@ -485,7 +485,16 @@ function extractCallerName(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
   const intro = lines.match(/CALLER:[^\n]*?(?:my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
-  if (intro && isValidName_(intro[1])) return cleanName_(intro[1]);
+  // FIX 2026-08-28 (lead 1046). This fallback scans the WHOLE transcript for
+  // "I'm X" with no sense of whether a name was being asked for. On 1046 the AI
+  // asked for the name as its last turn and the caller never answered, so this
+  // matched the caller's OPENING line -- "Hi. I'm relocating from California."
+  // Unlike the ask-loop above it has no contextual signal, so hold it to a
+  // stricter shape: a first name, optionally one surname. A 3+ word phrase
+  // reaching this path is far more often intent than identity.
+  const introName = intro ? unspell_(intro[1]) : '';
+  const introOk = introName && introName.trim().split(/\s+/).length <= 2;
+  if (introOk && isValidName_(introName)) return cleanName_(introName);
 
   // NOTE (2026-07-24): the greeting no longer asks for the name (it now opens
   // with "How can I help you today?"), so the caller's FIRST utterance is their
@@ -493,6 +502,25 @@ function extractCallerName(session) {
   // removed here — capturing it would store an intent phrase as the name. The AI
   // now asks for the name in-conversation, which the askPattern loop above catches.
   return '';
+}
+
+// Join a spelled-out name into a word. A caller who answers the name ask with
+// "S h a r d e" is SPELLING "Sharde", not giving a six-word name.
+// Bug found 2026-08-28 (lead 1044): the >4-token guard in isValidName_ rejected
+// the spelled form outright, so a tour-consenting prospect landed with name=""
+// even though the AI captured and used the name correctly on the call. Short
+// spellings were worse than dropped -- "J o s e" is only 4 tokens, so it PASSED
+// the guard and stored the letters verbatim.
+// Conservative on purpose: requires 3+ tokens and EVERY token a single letter,
+// so real multi-word names ("Juanita Carranza", "Mary Anne Smith") are untouched.
+function unspell_(s) {
+  const t = String(s || '').trim().replace(/[.,!?\u00bf\u00a1]+$/, '').trim();
+  if (!t) return s;
+  const toks = t.split(/\s+/);
+  if (toks.length < 3) return s;
+  if (!toks.every(w => /^[A-Za-z\u00c0-\u00ff]$/.test(w))) return s;
+  const joined = toks.join('');
+  return joined.charAt(0).toUpperCase() + joined.slice(1).toLowerCase();
 }
 
 function isValidName_(s) {
@@ -510,6 +538,18 @@ function isValidName_(s) {
   // Reject unit-code patterns like "D12", "A11", "C24" — those are unit
   // tags from current residents, not caller names.
   if (/^[a-z]\s?\d{1,3}$/i.test(t)) return false;
+  // FIX 2026-08-26 (lead 1034: name landed as "in f" from "I'm in f 1").
+  // No real name contains a digit, so a digit means we captured a unit
+  // designator, not a person. Broader than the rule above, which only fired
+  // when the ENTIRE string was a unit code ("D12"), not "apartment 5".
+  if (/\d/.test(t)) return false;
+  // Same bug, digit-free half: the intro-stripper reduces "I'm in f 1" to
+  // "in f" because the capture class stops at the digit, so no digit remains
+  // to catch. Callers answer the name question with where they live more
+  // often than we assumed. "de" is deliberately NOT in this list - it would
+  // reject real surnames like "De La Cruz".
+  // Merged 2026-08-28: of|for|with|by|about|number added to the original list.
+  if (/^(in|at|on|of|for|from|with|by|about|apt|apto|apartment|apartamento|unit|unidad|building|bldg|edificio|room|number)\b/i.test(t)) return false;
   // Reject any name containing question marks (regular or Spanish inverted).
   // Speech-to-text occasionally prepends "¿" or appends "?"; either signals
   // the transcript treated the utterance as a question, not a name.
@@ -517,6 +557,13 @@ function isValidName_(s) {
   // Word boundary \b is ASCII-only in JS, so we explicitly anchor with (\s|$)
   // to catch accented Spanish question-starters like "qué" and "cómo".
   if (/^(what|how|is|are|when|where|why|who|do|does|can|could|would|will|should|may|might|qué|cómo|cuándo|dónde|por\s*qué|quién)(\s|$)/i.test(t)) return false;
+  // FIX 2026-08-28 (lead 1046: name landed as "relocating from California").
+  // The junk list above only tests the FIRST word, so an intent phrase whose
+  // first word happens to be novel sails through. Test EVERY token against a
+  // tighter set of function/intent words. Tokens of 1 character are skipped so
+  // a middle initial ("Mary A Smith") still validates.
+  const phrase = /^(from|to|with|about|for|and|the|my|me|near|by|looking|relocating|moving|searching|planning|hoping|checking|coming|arriving|interested|calling|trying|wanting|needing|new|newly|asap)$/i;
+  if (t.split(/\s+/).some(w => w.length > 1 && phrase.test(w))) return false;
   if (t.split(/\s+/).length > 4) return false;
   return true;
 }
@@ -632,8 +679,27 @@ async function postLeadToDashboard(session) {
   // Awaiting here adds ~1-2s to the post-call writeback, which is fine
   // because nothing is blocked on it (caller already hung up).
   const { ai_summary, ai_action } = await generateCallSummary(session);
-  if (ai_summary) console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
-  if (ai_action)  console.log(`Call action: ${ai_action}`);
+  // FIX 2026-08-26: "No follow-up needed" was firing on 70 of 107 voice calls,
+  // including confirmed-unresolved ones (lead 1035: resident locked out, routed
+  // to the office, still marked no-follow-up). Haiku only sees the transcript,
+  // so it cannot know we failed to capture a name or that the handoff was never
+  // confirmed back. Override its no-follow-up verdict when either is true.
+  // Deliberately NOT flagging every unnamed call - only ones the model already
+  // declared closed - so the field keeps its meaning instead of flipping from
+  // always-clear to always-follow-up, which is equally useless as triage.
+  let ai_action_final = ai_action;
+  if (ai_action && /no follow.?up/i.test(ai_action)) {
+    const handoff = /(call (?:our|the) office|contact (?:our|the) office|give (?:our|the) office a call|extension \w+|llamar a (?:nuestra|la) oficina|llame a (?:nuestra|la) oficina|extensi\u00f3n \w+)/i.test(lines);
+    const reasons = [];
+    if (!callerName) reasons.push('no name captured');
+    if (handoff)     reasons.push('caller sent to the office, handoff never confirmed');
+    if (reasons.length) {
+      ai_action_final = `Follow up - ${reasons.join('; ')}. Call back to confirm this was resolved.`;
+    }
+  }
+
+  if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
+  if (ai_action_final) console.log(`Call action: ${ai_action_final}`);
 
   try {
     const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
@@ -647,7 +713,7 @@ async function postLeadToDashboard(session) {
         summary,
         status:   'new',
         ai_summary,
-        ai_action,
+        ai_action: ai_action_final,
       }),
     });
     const out = await res.json();
