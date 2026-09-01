@@ -485,6 +485,17 @@ function extractCallerName(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
   const intro = lines.match(/CALLER:[^\n]*?(?:my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
+  // FIX 2026-09-01 (lead 1060). A caller turn that is a QUESTION is not a turn
+  // in which someone gives their name. "CALLER: I'm sorry?" matched here and
+  // stored the name "sorry" for a caller the AI itself correctly called Laura.
+  // Isolate the line this matched and refuse it if it is a question.
+  let introLine = '';
+  if (intro) {
+    const lineStart = lines.lastIndexOf('\n', intro.index) + 1;
+    const lineEnd   = lines.indexOf('\n', intro.index);
+    introLine = lines.slice(lineStart, lineEnd === -1 ? undefined : lineEnd);
+  }
+  const introIsQuestion = /[?¿]/.test(introLine);
   // FIX 2026-08-28 (lead 1046). This fallback scans the WHOLE transcript for
   // "I'm X" with no sense of whether a name was being asked for. On 1046 the AI
   // asked for the name as its last turn and the caller never answered, so this
@@ -493,7 +504,7 @@ function extractCallerName(session) {
   // stricter shape: a first name, optionally one surname. A 3+ word phrase
   // reaching this path is far more often intent than identity.
   const introName = intro ? unspell_(intro[1]) : '';
-  const introOk = introName && introName.trim().split(/\s+/).length <= 2;
+  const introOk = introName && !introIsQuestion && introName.trim().split(/\s+/).length <= 2;
   if (introOk && isValidName_(introName)) return cleanName_(introName);
 
   // NOTE (2026-07-24): the greeting no longer asks for the name (it now opens
@@ -530,7 +541,7 @@ function isValidName_(s) {
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
-  const junk = /^(calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
+  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
   // Strip accents (decompose + drop combining marks) so accented affirmations
   // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
   const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
