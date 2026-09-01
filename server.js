@@ -84,7 +84,7 @@ const CONTENT_TTL_MS  = 60 * 1000; // re-check the store at most once a minute
 const DEFAULT_CONTENT = {
   meta: { version: 0, effective_date: 'baseline', updated_by: 'DEFAULT_CONTENT' },
   utilities_line: 'ALL UTILITIES INCLUDED IN RENT.',
-  obsolete_figures: ['ten fifty', 'eleven hundred', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty'],
+  obsolete_figures: ['ten fifty', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty'],
   obsolete_figures_pronunciation_extra: ['twelve hundred ninety five'],
   properties: {
     nmfa: {
