@@ -53,7 +53,7 @@ const PROPERTIES = {
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
     units: `
 3 bedroom: seventeen fifty a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
-2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
+2 bedroom: twelve ninety five a month, all utilities included — NOT available right now.
 1 bedroom: nine ninety five a month, all utilities included — NOT available right now, all leased.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
@@ -108,7 +108,7 @@ const DEFAULT_CONTENT = {
     windsong: {
       hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
       hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
-      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE; 1-bedrooms are all leased, so never offer a 1-bedroom for a tour or application. Windsong pricing is a standard move-in special.',
+      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Availability is set by the store - see available_types. Never offer a unit type for a tour or application unless it is listed as available.',
       unit_types: {
         '1br': { status: 'not_available', quotable: false },
         '2br': {
@@ -189,10 +189,23 @@ function renderUnitsBlock(key, content) {
   // literal if the store lacks it (behavior-preserving).
   const sp = (u, fb) => (p.unit_types[u] && p.unit_types[u].utils_spoken) ? p.unit_types[u].utils_spoken : fb;
   const oneBR = sp('1br', 'nine ninety five'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'seventeen fifty');
-  if (key === 'nmfa') {
-    return `\n2 bedroom: ${twoBR} a month, all utilities included (electric, water, sewer, and trash). ${p.unit_types['2br'].sqft_line}. AVAILABLE NOW.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now.\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`;
-  }
-  return `\n3 bedroom: ${threeBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.\n2 bedroom: ${twoBR} a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.\n1 bedroom: ${oneBR} a month, all utilities included — NOT available right now, all leased.`;
+  // AVAILABILITY IS NOW DRIVEN BY THE STORE (2026-09-02). Both return statements
+  // here used to hardcode "AVAILABLE NOW" per unit type, which is why marking a
+  // type unavailable in content.json changed its price everywhere and its
+  // availability nowhere. Prefer the derived available_types from content-api;
+  // fall back to the quotable flags, which DEFAULT_CONTENT also carries.
+  const avail = Array.isArray(p.available_types)
+    ? p.available_types
+    : Object.keys(p.unit_types || {}).filter(t => p.unit_types[t] && p.unit_types[t].quotable);
+  const price = { '1br': oneBR, '2br': twoBR, '3br': threeBR };
+  const label = { '1br': '1 bedroom', '2br': '2 bedroom', '3br': '3 bedroom' };
+  const order = key === 'nmfa' ? ['2br', '1br', '3br'] : ['3br', '2br', '1br'];
+  const sq = (t) => (p.unit_types[t] && p.unit_types[t].sqft_line) ? ' ' + p.unit_types[t].sqft_line + '.' : '';
+  return '\n' + order.filter(t => p.unit_types[t]).map(t =>
+    avail.indexOf(t) !== -1
+      ? label[t] + ': ' + price[t] + ' a month, all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
+      : label[t] + ': ' + price[t] + ' a month, all utilities included \u2014 NOT available right now.'
+  ).join('\n');
 }
 
 // ============================================================
@@ -220,6 +233,37 @@ function buildSystemPrompt(property, content) {
   const OBSX = CC.obsolete_figures_pronunciation_extra || [];
   // "a", "b", or "c"  — matches the exact prose format used in the prompt.
   const orList = (arr) => arr.map(x => `"${x}"`).join(', ').replace(/, ("[^"]*")$/, ', or $1');
+
+    // ── Availability comes from the store, not from prose ──────────────────
+    // Added 2026-09-02. content-api.php now derives available_types and
+    // availability_line_en from the same status/quotable flags Jenea edits.
+    // Before this, availability was hardcoded English right here, so turning a
+    // unit type off in the store changed its PRICE everywhere and its
+    // AVAILABILITY nowhere - which is how this agent kept offering a Windsong
+    // 2-bedroom that did not exist (findings F-20260902-01, F-20260831-07).
+    //
+    // If the derived fields are absent (older content, or DEFAULT_CONTENT after
+    // a failed fetch) the same list is computed from the quotable flags, which
+    // both carry. So there is no stale prose fallback left to drift.
+    const PROP  = CC.properties[property.key] || {};
+    const PUT   = PROP.unit_types || {};
+    const AVAIL = Array.isArray(PROP.available_types)
+      ? PROP.available_types
+      : Object.keys(PUT).filter(t => PUT[t] && PUT[t].quotable);
+    const UNIT_LABEL = { '1br': '1 bedroom', '2br': '2 bedroom', '3br': '3 bedroom' };
+    const UNIT_PRICE = property.key === 'nmfa'
+      ? { '1br': nm1p, '2br': nm2p, '3br': nm3p }
+      : { '1br': ws1p, '2br': ws2p, '3br': ws3p };
+    const availSentence = PROP.availability_line_en
+      || (AVAIL.filter(t => UNIT_LABEL[t]).length
+            ? 'Right now our ' + AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') + ' are AVAILABLE.'
+            : 'Availability is limited right now - check with the office before offering a tour.');
+    const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
+      AVAIL.indexOf(t) !== -1
+        ? '- ' + UNIT_LABEL[t] + ': "' + UNIT_PRICE[t] + ' a month, all utilities included." AVAILABLE NOW - offer it for a tour.'
+        : '- ' + UNIT_LABEL[t] + ': say "' + UNIT_PRICE[t] + ' a month" ONLY as "our ' + UNIT_LABEL[t] + ', which is not available right now." Never offer it for a tour or application.'
+    ).join('\n');
+    const offerableList = AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now';
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 
 ADDRESS RULE:
@@ -233,13 +277,8 @@ ${property.units}
 
 PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
 - Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. NEVER present two prices or a choice. NEVER say the word "bill". NEVER say "most people choose".
-${property.key === 'nmfa' ? `- THIS LINE IS NMFA. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE. 1-bedrooms exist but are NOT available.
-- 2 bedroom: "${NM2.utils_spoken} a month, all utilities included." AVAILABLE NOW — this is the unit to offer for a tour.
-- 1 bedroom: say "${nm1p} a month" ONLY as "our one-bedroom, which isn't available right now." Never offer it for a tour or application.
-- 3 bedroom: "${nm3p} a month, all utilities included." AVAILABLE NOW — offer it for a tour just like the 2-bedroom.` : `- THIS LINE IS WINDSONG. Right now a 2-bedroom AND a 3-bedroom are AVAILABLE. 1-bedrooms exist but are NOT available (all leased).
-- 2 bedroom: "${ws2p} a month, all utilities included." AVAILABLE NOW — this is the unit to offer for a tour.
-- 3 bedroom: "${WS3.utils_spoken} a month, all utilities included." AVAILABLE NOW — offer it for a tour just like the 2-bedroom.
-- 1 bedroom: say "${ws1p} a month" ONLY as "not available right now, all leased." Never offer it.`}
+- THIS LINE IS ${property.key === 'nmfa' ? 'NMFA' : 'WINDSONG'}. ${availSentence}
+${unitLines}
 - After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
@@ -253,10 +292,8 @@ MOVE-IN COST:
   - Spanish: "El costo de mudanza depende de tu solicitud y los términos del contrato, así que nuestro equipo te dará los números exactos en la visita. El precio mensual ya incluye todas tus utilidades. ¿Quieres que te envíe el enlace de la cita por texto?"
 
 CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
-${property.key === 'nmfa' ? `- This line is North Mountain Foothills (NMFA). NMFA has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, a 2-bedroom AND a 3-bedroom are AVAILABLE (1-bedrooms are not available).
-- If the caller asks about a 3 bedroom, offer the NMFA three-bedroom: "We do have a three-bedroom available here at North Mountain Foothills for ${nm3p} a month, all utilities included. Want me to text you the tour link so you can come see it?"
-- The NMFA 3-bedroom is ${nm3p} a month, all utilities included, and is AVAILABLE now. Offer it for a tour just like the 2-bedroom.` : `- This line is Windsong. Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units. Right now, a 2-bedroom AND a 3-bedroom are AVAILABLE; 1-bedrooms are all leased.
-- If the caller asks about a 2-bedroom or 3-bedroom, offer it for a tour. If the caller asks about a 1-bedroom, tell them it is not available right now and offer the available two-bedroom or three-bedroom: "Our one-bedrooms are all leased right now. We do have a two-bedroom available at ${ws2p} a month and a three-bedroom at ${WS3.utils_spoken} a month, all utilities included. Want me to text you the tour link, or share the office number?"`}
+- This line is ${property.key === 'nmfa' ? 'North Mountain Foothills (NMFA)' : 'Windsong'}. It has 1-bedroom, 2-bedroom, and 3-bedroom units. ${availSentence}
+- Offer a tour or application ONLY for: ${offerableList}. If the caller asks about any other unit type, tell them it is not available right now, warmly offer one of the available types with its all-in price, and if they stay set on the type we do not have, offer the waiting list.
 - NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.
 - TOUR LINK GATE: only send a tour link for a bedroom count the caller asked for, or explicitly agreed to BY BEDROOM COUNT. A vague "okay" or "sure" right after you pivoted them to a different unit type is NOT agreement to that unit type. Confirm first: "Just so I book the right one, the three-bedroom is what I would be showing you. Does that work?" If they do not clearly say yes to that bedroom count, do NOT send the link.
 - If the caller named a bedroom count and the only AVAILABLE unit is two or more bedroom counts away from it (for example they want a one-bedroom and only a three-bedroom is open), LEAD with the waiting list. Mention the available unit once, with its price, and do not push the tour.
