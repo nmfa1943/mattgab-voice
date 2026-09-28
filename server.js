@@ -409,8 +409,16 @@ If the caller says they want to "reschedule," "change my tour," "move my appoint
 Then close with the CLOSING template above (English or Spanish per call language). Do not use the deprecated "Feel free to call or text this number anytime" wording.
 
 If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
-"Of course. You can reach our office at ${property.phone}. Our hours are ${property.hours}. Is there anything else I can help you with in the meantime?"
+"Of course. You can reach our office at ${property.phone}. Our hours are ${property.hours}. Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?"
 If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
+TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the caller says yes to leaving a message, OR says they already called the office, the office did not answer, the office is closed, or they want to "leave a message," do NOT read the office number again. Take the message right away, one question per turn:
+1. "Can I get your first name?"
+2. "And what would you like me to tell the team?" (If they already said why they are calling, skip this and repeat the reason back in one short phrase instead.)
+3. "Is the number you're calling from the best one for a callback?" If they say no, ask them to say the best number slowly.
+Then confirm: "Thank you, [Name]. I'll pass this to the team and they'll call you back during office hours." Then ask "Is there anything else I can help you with?"
+The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
+Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
+Spanish: "Claro. Puedes comunicarte con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo te devuelva la llamada a este número. ¿Quieres dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puedes dar tu nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverte la llamada?"), and confirm: "Gracias, [Nombre]. Le paso tu mensaje al equipo y te devolverán la llamada en horario de oficina."
 
 ============================================================
 LANGUAGE RULES
@@ -443,7 +451,7 @@ RULES
 - NEVER state availability dates.
 - NEVER ask what time or day works for a tour. The caller picks from the Calendly link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
-- Person requested: main office line ${property.phone}, ${property.hours}. They can also call or text me anytime at ${property.ai_number}.
+- Person requested: main office line ${property.phone}, ${property.hours}, and offer to take a message for a callback (see TAKE THE MESSAGE above). NEVER give this AI line (${property.ai_number}) as a way to reach staff — it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
 - STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Stephany routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are Monday through Friday, nine AM to six PM, and Saturday, ten AM to four PM." Felipa NO LONGER WORKS HERE: if a caller asks for Felipa, do not route to her - say warmly "Felipa is no longer with us. Stephany handles leasing now and can help you with anything Felipa would have," then give Stephany's NMFA number and hours (extension one, as above). Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are Monday through Friday, nine AM to five PM, and Saturday, ten AM to three PM." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is no longer on the call tree; say "Yanelia is not on our office line right now, but you can reach the team at six oh two, nine nine seven, two nine two eight and they'll take a message." For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
 - NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the Felipa-departure message from the mapping above, then offer Stephany): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NMFA ext 1): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A. For Yanelia: Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Stephany, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
@@ -680,6 +688,8 @@ If the call was clearly a wrong number, or the caller explicitly declined help, 
 
 If the caller engaged at all but the call ended WITHOUT a captured name AND WITHOUT an established reason for calling (for example a one-word reply and then silence, or a dropped call after the greeting), do NOT use "No follow-up needed". Set action to "Unresolved, no information captured, call this number back" and state plainly in the summary that nothing was captured. A caller who reached us and got nothing is an open follow-up, not a closed call.
 
+If the caller asked for a person, asked for a manager or a named staff member, or left a message for the team, NEVER use "No follow-up needed". Set action to start with "CALLBACK REQUESTED:" followed by what the caller wants in a few words (for example "CALLBACK REQUESTED: asking whether their deposit was received"). Never put a dollar figure in this field that the caller did not say. If the caller gave a different callback number, include it in the summary.
+
 Caller: ${callerName}
 Property: ${propertyName}
 
@@ -757,6 +767,85 @@ async function postLeadToDashboard(session) {
     if (reasons.length) {
       ai_action_final = `Follow up - ${reasons.join('; ')}. Call back to confirm this was resolved.`;
     }
+  }
+
+  // FIX 2026-09-21 (F-20260911-02): 23 calls asked for a person and were only
+  // read the office number back; several redialled because that route had
+  // already failed. The prompt now takes a message, but the flag staff sort on
+  // must not depend on Haiku obeying its prompt, so detect the request from the
+  // caller's own turns and force the action to CALLBACK REQUESTED.
+  const callerTurns = session.conversation
+    .filter(m => m.role === 'user')
+    .map(m => m.content || '')
+    .join('\n');
+  // --- BEGIN detectHumanAsk (check.js evaluates the text between these markers) ---
+  // FIX 2026-09-21 (F-20260911-02), revised 2026-09-23 after D-20260922-04.
+  // Detect from the caller's OWN words that they want a person, so the flag staff
+  // sort on does not depend on Haiku obeying its prompt.
+  function detectHumanAsk_(t) {
+    var NAME = '(stephany|stephanie|stefanie|estefani|estefany|tiffany|angel|anjel|angie|angela|jose|jos\u00e9|joseph|hose-a|yanelia|yenelia|janelia|daniela|janelle|felipa|salipa|filipa|felipe|falipa|philippa|phylipa)(?![a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1])';
+    var ASK = new RegExp(
+      // ask for a person, generically ("with with" = real transcript stutter)
+      '\\b(speak|talk|talking|spoke|chat) (to|with) ((to|with) )?(a |an |the |your |some )?(actual |real |live |human )?(someone|somebody|person|human|representative|rep|agent|manager|supervisor|operator|office|leasing|staff|live|real)s?\\b'
+      // ask for a NAMED member of staff - always tied to asking wording, never a bare name
+      + '|\\b(speak|talk|talking|spoke) (to|with) ((to|with) )?(mr\\.? |ms\\.? |mrs\\.? )?' + NAME
+      + '|\\bis ' + NAME + ' (there|around|available|working|avail)\\b'
+      // "in" is allowed back (D-20260928-11), but ONLY when it ends the clause
+      // or carries office context. Never before a noun: "Is Angel in unit 104?"
+      // and "This is Jose in unit 104" must stay ignored.
+      + '|\\bis ' + NAME + ' in(?=\\s*[?.!,]|\\s*$|\\s+(the )?(office|today|tomorrow|right now|this morning|this afternoon)\\b)'
+      + '|\\b(can|could|may) i (get|have|speak to|talk to) ' + NAME
+      + '|\\b(hablar|comunicarme|comunicar|hable|hablo|pasar|pasarme) con (sr\\.? |sra\\.? )?' + NAME
+      + '|\\b(est\\u00e1|esta|se encuentra) ' + NAME
+      // manager: no bare "a manager" - it fired on "I work as a manager at Walmart"
+      + '|\\b(office|property) manager\\b'
+      // the route already failed
+      + '|\\b(already|just|twice|again) called (that|this|the|your)\\b'
+      + '|\\b(no one|nobody|no body) (ever )?(answer|answers|answered|pick up|picks up|picked up)\\b'
+      + '|\\b(live|real|actual) (person|agent|human)\\b'
+      // explicit routing requests
+      + '|\\btransfer me\\b|\\bput me through\\b|\\bconnect me\\b'
+      + '|\\b(need|want|get me|give me|requesting) (a |an |the |your )?(supervisor|manager|representative|operator|person|human|someone|somebody)\\b'
+      + '|\\bis there (a |an )?(human|person|real person|live person|someone|somebody)\\b'
+      // the feature is called callback capture - so detect asking for one
+      + '|\\bcall(ing)? me back\\b'
+      // ...and the other ways they ask for one (D-20260927-02 item 1).
+      // "callback" as ONE word only: "I'll call back later" is the caller
+      // saying they will call US, which is not a request for a call.
+      + '|\\bcallbacks?\\b'
+      + '|\\bgive (me|us) a call\\b'
+      + '|\\b(have|having|get|tell|ask) (' + NAME + '|someone|somebody|anyone|a manager|the manager|the office|leasing|her|him|them) (to )?call me\\b'
+      // Spanish - every branch needs a noun, or it flags "hablar con el que va a vivir conmigo"
+      + '|\\b(hablar|comunicarme|comunicar|comunique|comuniquen|contactar|pasar|pasarme) con (alguien|una persona|un representante|una representante|el gerente|la gerente|el encargado|la encargada|la oficina|un agente|el equipo)\\b'
+      + '|\\bpersona real\\b'
+      + '|\\b(quiero|necesito|puedo) (hablar con )?(un |una )?representante\\b'
+      + '|\\bcon (un|una) representante\\b'
+      + '|\\bque (alguien )?me llame\\b|\\bme puede(n)? llamar\\b|\\b(que me devuelvan|devolverme) la llamada\\b'
+      + '|\\bll\\u00e1meme\\b|\\bllameme\\b|\\bpodr\\u00eda llamarme\\b|\\bpodria llamarme\\b'
+    , 'i');
+    // "leave a message" is handled separately because it can be REFUSED, and a
+    // refusal must not become a callback request (D-20260922-04 item 3). Same
+    // principle as isConsentAffirmative below: refusals win.
+    var MSG = /\b(left|leave|leaving|take|taking) a message\b|\bdejar(le)? (un )?(mensaje|recado)\b/i;
+    // The refusal must be ADJACENT to the message phrase, not merely within
+    // 25 characters of it (D-20260927-02 item 2). Only modal/infinitive glue
+    // may sit between them, so "I don't know, can I just leave a message?"
+    // reads as the REQUEST it is instead of being swallowed as a refusal.
+    // Same negators as before - this narrows the gap, it does not add triggers.
+    var REFUSE = /\b(?:don'?t|do not|won'?t|not|rather not|no need|nope)(?:\s+(?:want|wanna|need|wish|care|like|prefer|gonna|going|have|got|really|even|just|to|a|any))*\s+(?:leave|leaving|take|taking|need)\s+(?:a\s+|any\s+|the\s+)?message\b|\bno\s+(?:quiero|necesito|deseo)(?:\s+(?:que|le))?\s+(?:dejar(?:le)?\s+)?(?:un\s+|una\s+|ning[u\u00fa]n\s+)?(?:mensaje|recado)\b/i;
+    // bare Spanish "representante" is an IVR-style answer and worth catching,
+    // but not when the caller is describing their own job.
+    var SELFDESC = /\bsoy (un |una |el |la )?(representante|operador|operadora|gerente|supervisor|supervisora)\b/i;
+    if (/\brepresentante\b/i.test(t) && !SELFDESC.test(t)) return true;
+    if (ASK.test(t)) return true;
+    if (MSG.test(t) && !REFUSE.test(t)) return true;
+    return false;
+  }
+  // --- END detectHumanAsk ---
+  const humanAsk = detectHumanAsk_(callerTurns);
+  if (humanAsk && !/^CALLBACK REQUESTED:/i.test(ai_action_final || '')) {
+    const detail = (ai_action_final && !/no follow.?up/i.test(ai_action_final)) ? ` ${ai_action_final}` : ' Caller asked for a person; see transcript for the reason.';
+    ai_action_final = `CALLBACK REQUESTED:${detail}`.substring(0, 240);
   }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
