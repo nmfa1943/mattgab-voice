@@ -745,7 +745,17 @@ async function postLeadToDashboard(session) {
 
   const callerName = extractCallerName(session);
 
-  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
+  // TRANSCRIPT LENGTH. This was 4000 characters, which silently cut the end off
+  // 23 of 673 calls — and the end is where a call goes wrong. One truncated call
+  // stopped mid "press 9, then 1, then 1"; another cut off a caller saying "I said
+  // no already, you can hang up". Those are exactly the calls somebody needs to
+  // read in full.
+  //
+  // The column is MySQL TEXT, which holds 65,535 BYTES, not characters. Spanish
+  // accents cost two bytes each, so the ceiling in characters is lower than it
+  // looks. 15,000 characters cannot exceed the column even if every character were
+  // four bytes, and is roughly three times the longest call we have ever recorded.
+  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 15000)}`;
 
   // Generate the AI summary + action in parallel-ish with the network call.
   // Awaiting here adds ~1-2s to the post-call writeback, which is fine
