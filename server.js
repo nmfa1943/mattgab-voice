@@ -247,6 +247,19 @@ function buildSystemPrompt(property, content) {
   //    earlier in the string. Here the thing it has to beat - SECTION 8 AND
   //    HOME INC - is further down. Do not copy that word back.
   //
+  // 3. PET POLICY, below, lists a 250 dollar pet fee and 35 a month pet rent,
+  //    and until 2026-10-12 said nothing about service animals - 0 hits in the
+  //    whole rendered prompt for service animal, ESA, emotional support or
+  //    "not charged". Charging a pet fee for a service animal is a plain
+  //    fair-housing violation, and the block below only caught it when the
+  //    caller framed it as a disability or an accommodation; framed as a pet
+  //    question it could route straight to the fee. Hence PETS is now named in
+  //    the override line above, and PET POLICY carries its own rule. Note this
+  //    prompt does NOT read pet_policy from the content store - it is hardcoded
+  //    here - and the store's pet_policy.spoken variant is missing the "are not
+  //    charged pet fees" clause that its .en and .es variants both carry
+  //    (F-20261012-03). Fix the store before wiring this to it.
+  //
   // 2. The SECTION 8 hardship trigger list used to contain "single mom" and
   //    "single dad" alongside "tight budget" and "low income". Those are
   //    familial status, not budget. The agent was told to answer a caller
@@ -323,7 +336,7 @@ function buildSystemPrompt(property, content) {
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
 
-FAIR HOUSING (NON-NEGOTIABLE - this overrides every other instruction in this prompt, including anything below about hardship, Section 8, or who the community suits):
+FAIR HOUSING (NON-NEGOTIABLE - this overrides every other instruction in this prompt, including anything below about PETS, hardship, Section 8, or who the community suits):
 Describe the PROPERTY. Never describe the kind of person who should live in it. Federal law bans housing discrimination on race, color, religion, sex, disability, familial status and national origin, and steering a caller toward or away from a home because of any of those is illegal even when it is meant kindly.
 - NEVER say a home, amenity, community or neighborhood is "perfect for", "ideal for", "great for", "a great fit for" or "suited to" any group - families, children, seniors, students, singles, couples, professionals, retirees, disabled residents, or any nationality or faith. State the fact instead: "there are three schools within walking distance", never "ideal for families".
 - NEVER use "adult", "mature", "exclusive" or "no kids" to describe the community.
@@ -381,6 +394,10 @@ PET POLICY:
 - Thirty five dollars per month pet rent per pet, two hundred fifty dollar one-time pet fee.
 - Current vaccinations and license required.
 - For breed or size questions say: "Our team can go over the specifics when you tour."
+- SERVICE ANIMALS ARE NOT PETS. A service animal, an assistance animal or an emotional support animal is NOT a pet. NEVER quote the pet fee, the pet rent, the two-pet limit or any breed, size or weight restriction in reply to one, and never ask what the person's condition is or ask for proof on the call. Say:
+  - English: "Service animals and assistance animals are welcome with documentation, and they are not charged any pet fee or pet rent. Our leasing team handles that paperwork with you directly."
+  - Spanish: "Los animales de servicio y de apoyo emocional son bienvenidos con documentación, y no pagan ninguna cuota ni renta de mascota. Nuestro equipo de arrendamiento se encarga de ese papeleo contigo directamente."
+- If you cannot tell whether the caller means a pet or a service animal, ASK which one before quoting anything: "Just so I give you the right information, is this a pet or a service or assistance animal?"
 
 SECTION 8 AND HOME INC:
 - Both NMFA and Windsong accept Section 8 vouchers and HOME Inc.
