@@ -50,7 +50,19 @@ const PROPERTIES = {
     hours: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
     hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
-    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
+    // APPLICATION LINK. This was locations=4 from 2026-07-16 until 2026-10-12,
+    // and locations=4 is not a Windsong application - it is a Rent Manager
+    // ERROR page ("Tenant Web Access has encountered an unexpected problem").
+    // Every Windsong caller who said yes to "want me to text you the
+    // application link?" got a dead link for nearly three months. Probed
+    // 2026-10-12: of locations=1..12 and 20, only locations=2 resolves. There
+    // is no Windsong-only link to find. locations=2 opens the shared Rent
+    // Manager form whose Property Selection dropdown lists North Mountain
+    // Foothills AND Windsong Alliance Group LLC, so the caller picks their own
+    // property - which is exactly what the website and the WordPress chatbot
+    // already send everyone to. Verify any future change by LOADING the URL,
+    // not by confirming that a text arrived.
+    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 2 bedroom: twelve ninety five a month, all utilities included — NOT available right now.
@@ -217,6 +229,35 @@ const sessions = new Map();
 // SYSTEM PROMPT BUILDER (aligned with chat widget voice and rules)
 // ============================================================
 function buildSystemPrompt(property, content) {
+  // ── FAIR HOUSING ──────────────────────────────────────────────────────────
+  // Added 2026-10-12 (D-20261012-01). Until today this prompt contained NO
+  // fair-housing language of any kind: a search of both branches for fair
+  // housing / protected class / familial / disability / accommodation /
+  // discriminat / steering returned zero hits. This is the highest-exposure
+  // channel we run - live two-way conversation on both lines, in two
+  // languages, with no reviewer - and callers volunteer protected information
+  // unprompted. The block below is ported from the $rules string in
+  // fb-webhook.php (D-20261009-03), where the same gap produced "perfect for
+  // families" to a commenter who had just said he was a disabled senior.
+  //
+  // Two things to know before editing it:
+  //
+  // 1. It says it overrides anything BELOW it. In fb-webhook.php the
+  //    equivalent line said "above", because there the conflicting copy sat
+  //    earlier in the string. Here the thing it has to beat - SECTION 8 AND
+  //    HOME INC - is further down. Do not copy that word back.
+  //
+  // 2. The SECTION 8 hardship trigger list used to contain "single mom" and
+  //    "single dad" alongside "tight budget" and "low income". Those are
+  //    familial status, not budget. The agent was told to answer a caller
+  //    differently because she had disclosed being a single parent - a kind
+  //    response, but differential treatment on a protected characteristic
+  //    counts whichever direction it runs, and it contradicted this block
+  //    directly. Both phrases were removed and must not be restored. The
+  //    eight financial phrases still catch the real case: a single parent who
+  //    says money is tight hits "tight budget" like anyone else, and
+  //    accepting Section 8 is unchanged and still volunteered warmly. Source
+  //    of income is not a federally protected class; familial status is.
   const CC   = content || DEFAULT_CONTENT;
   const NM2  = CC.properties.nmfa.unit_types['2br'];       // NMFA 2-bedroom prices
   const WS2  = CC.properties.windsong.unit_types['2br'];   // Windsong 2-bedroom prices
@@ -282,6 +323,17 @@ function buildSystemPrompt(property, content) {
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
 
+FAIR HOUSING (NON-NEGOTIABLE - this overrides every other instruction in this prompt, including anything below about hardship, Section 8, or who the community suits):
+Describe the PROPERTY. Never describe the kind of person who should live in it. Federal law bans housing discrimination on race, color, religion, sex, disability, familial status and national origin, and steering a caller toward or away from a home because of any of those is illegal even when it is meant kindly.
+- NEVER say a home, amenity, community or neighborhood is "perfect for", "ideal for", "great for", "a great fit for" or "suited to" any group - families, children, seniors, students, singles, couples, professionals, retirees, disabled residents, or any nationality or faith. State the fact instead: "there are three schools within walking distance", never "ideal for families".
+- NEVER use "adult", "mature", "exclusive" or "no kids" to describe the community.
+- NEVER comment on, infer from, or repeat back a caller's family size, age, disability, religion, nationality, or whether they have children - even when they volunteer it, and even to sound welcoming. Stay warm, but answer the question they actually asked with the same facts you would give anyone.
+- If a caller asks whether the community is good for children, for seniors, or for any other group, do NOT give a verdict on the group. Say everyone is welcome to apply, then give the concrete fact they are really asking about - the bedroom counts, the square footage, the quiet hours, what is nearby - and let them decide.
+- If a caller mentions a disability, a service or assistance animal, or asks for an accommodation, do NOT assess it, do NOT ask what the condition is, and do NOT promise anything. Say:
+  - English: "Everyone is welcome to apply here. Our leasing team handles accommodation requests, and they will go through that with you directly."
+  - Spanish: "Todos son bienvenidos a aplicar aqui. Nuestro equipo de arrendamiento se encarga de las solicitudes de adaptacion, y lo revisaran contigo directamente."
+- Quote the same prices, the same availability, the same unit types and the same process to every caller who asks, no matter what they have told you about themselves.
+
 ============================================================
 UNITS — USE ONLY THIS INFORMATION
 ============================================================
@@ -332,8 +384,9 @@ PET POLICY:
 
 SECTION 8 AND HOME INC:
 - Both NMFA and Windsong accept Section 8 vouchers and HOME Inc.
-- If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "single mom", "single dad", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
+- If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
 - Do not immediately pitch units or the special after a hardship mention. Keep the conversation open.
+- A caller saying they are a single parent is NOT a hardship signal and must not change your reply. Be warm, say nothing about their family, and answer what they asked. If they separately say money is tight, the financial phrases above already cover it.
 
 ============================================================
 CONVERSATION PRINCIPLES
