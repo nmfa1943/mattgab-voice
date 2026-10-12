@@ -589,9 +589,16 @@ function extractCallerName(session) {
   // Also strip leading inverted-Spanish punctuation that speech-to-text sometimes prepends
   // ("¿Marqués." should be captured as "Marqués", not "¿Marqués"). Bug fix 2026-05-15
   // after lead 370 landed with name="¿Marqués" (caller was Marcus).
+  // 2026-10-12 (lead 1291, Joanne): "to|for" added. The AI asked "Can I get your
+  // first name to send it to?" and she answered "To Joanne". isValidName_ tests
+  // every token against a phrase list that contains "to", so the WHOLE string was
+  // rejected and the lead landed with a blank name - while the AI went on calling
+  // her Joanne for the rest of the call. Stripping it here rather than loosening
+  // that list keeps the list strict: whatever is left still has to validate, so
+  // "To the office" becomes "the office" and is still rejected.
   const stripIntro = (s) => String(s).trim()
     .replace(/^[¿¡]+\s*/, '')
-    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '')
+    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es|to|for)\s+/i, '')
     .trim();
 
   // Walk turns. After each AI ask, grab the next caller turn and try to validate.
@@ -670,7 +677,13 @@ function isValidName_(s) {
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
-  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
+  // Expanded again 2026-10-12 (lead 1296) with Spanish COURTESY and filler. The
+  // list was English-weighted: "thanks" was blocked, "gracias" was not, so a
+  // caller who answered the name ask with "Gracias." twice - plainly declining -
+  // was stored as a prospect named Gracias. Checked before adding: the \b anchor
+  // and the first-word-only test mean real names are untouched, so "Yamileth"
+  // survives "ya", "Nadia" survives "nada", and "Claudia" survives "claro".
+  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale)\b/i;
   // Strip accents (decompose + drop combining marks) so accented affirmations
   // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
   const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
@@ -703,7 +716,11 @@ function isValidName_(s) {
   // tighter set of function/intent words. Tokens of 1 character are skipped so
   // a middle initial ("Mary A Smith") still validates.
   const phrase = /^(from|to|with|about|for|and|the|my|me|near|by|looking|relocating|moving|searching|planning|hoping|checking|coming|arriving|interested|calling|trying|wanting|needing|new|newly|asap)$/i;
-  if (t.split(/\s+/).some(w => w.length > 1 && phrase.test(w))) return false;
+  // FIX 2026-10-12 (lead 1257: "And, hopefully, you'll have" was stored as a
+  // name). The tokens here carried their punctuation, so the token was "And,"
+  // and /^and$/ never matched. Strip punctuation per token before testing.
+  const bare = (w) => w.replace(/^[^A-Za-z\u00c0-\u00ff]+|[^A-Za-z\u00c0-\u00ff]+$/g, '');
+  if (t.split(/\s+/).some(w => bare(w).length > 1 && phrase.test(bare(w)))) return false;
   if (t.split(/\s+/).length > 4) return false;
   return true;
 }
