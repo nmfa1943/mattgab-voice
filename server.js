@@ -1001,6 +1001,19 @@ function isConsentAffirmative(text) {
   return /\b(yes|yeah|yep|yup|sure|ok|okay|okey|please|go ahead|sounds good|that works|works for me|absolutely|definitely|of course|si|sí|claro|dale|por favor|esta bien|está bien|perfecto|adelante)\b/.test(t);
 }
 
+// Did THIS assistant line offer to text the caller something? Used to decide
+// whether a following "yes" is consent to be texted, as opposed to a "yes" to
+// some unrelated question ("Si, de 2 recamaras"). Requires BOTH a send/text verb
+// and the thing being sent, so ordinary sentences that merely contain "send"
+// do not qualify. Accent-flattened for the same reason detectSmsIntent is.
+function offersToText(text) {
+  if (!text) return false;
+  const flat = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const offersSend = /\b(send|sending|text you|envio|envie|enviar|enviarte|enviando|enviandote|mandar|mandarte|mando)\b/.test(flat);
+  const theThing   = /\b(link|enlace|text|texto|mensaje|sms)\b/.test(flat);
+  return offersSend && theThing;
+}
+
 // ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
@@ -1036,7 +1049,14 @@ function detectSmsIntent(text) {
   // NOTE: bare "solicitud" is deliberately absent. It also means a service
   // request, and apply is tested before portal, so it would steal maintenance
   // sends and text a resident an application form.
-  if (/\b(application|apply|aplicacion|aplicar)\b/.test(flat)) return 'apply';
+  // "solicitud" is what the Spanish agent actually calls the application
+  // ("el enlace de la solicitud"). It ALSO means a maintenance service request,
+  // and apply is tested BEFORE portal, so it only counts as the application when
+  // nothing in the line points at maintenance. Excluding it outright (as
+  // D-20261015-02 did) meant the Spanish apply link could never send at all.
+  if (/\b(application|apply|aplicacion|aplicar)\b/.test(flat) ||
+      (/\bsolicitud(es)?\b/.test(flat) &&
+       !/\b(mantenimiento|portal|service request|reparacion|reparaciones)\b/.test(flat))) return 'apply';
   if (/\b(portal|service request|maintenance|mantenimiento)\b/.test(flat)) return 'portal';
   return null;
 }
@@ -1177,6 +1197,9 @@ fastify.register(async function(fastify) {
             isSpanish: false,
             languageSwitched: false,
             sent: [],
+            // Set once the caller says an explicit yes to an offer to text them.
+            // See the gate below: consent survives the agent asking their name.
+            smsConsent: false,
             activeStream: null,
             conversation: [
               { role: 'system', content: buildSystemPrompt(property, content) }
@@ -1210,6 +1233,21 @@ fastify.register(async function(fastify) {
               ttsLanguage: 'es-US',
               transcriptionLanguage: 'es-US'
             }));
+          }
+
+          // CONSENT LATCH (2026-10-15). If this caller turn is an explicit yes
+          // AND the assistant line it answers offered to text them, remember it
+          // for the rest of the call. Without this, the agent asking "and your
+          // name?" between the yes and the send silently voided the consent and
+          // no link was ever sent - which is what happened on every Spanish call
+          // that reached the name question.
+          if (!session.smsConsent && isConsentAffirmative(text)) {
+            const answering = [...session.conversation].reverse()
+              .find(m => m.role === 'assistant');
+            if (answering && offersToText(answering.content)) {
+              session.smsConsent = true;
+              console.log('SMS consent latched for this call (caller said yes to a texting offer)');
+            }
           }
 
           session.conversation.push({ role: 'user', content: text });
@@ -1258,8 +1296,11 @@ fastify.register(async function(fastify) {
               if (intent && !session.sent.includes(intent) && session.from) {
                 // A2P 10DLC backstop: tour/apply links require an explicit affirmative
                 // on the caller's triggering turn. Portal is resident-requested, not gated.
-                if ((intent === 'tour' || intent === 'apply') && !isConsentAffirmative(text)) {
-                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn: "${(text || '').slice(0, 60)}"`);
+                // Consent counts if it is on THIS turn (original behaviour, kept)
+                // or was latched earlier in the call against a texting offer.
+                const consented = isConsentAffirmative(text) || session.smsConsent === true;
+                if ((intent === 'tour' || intent === 'apply') && !consented) {
+                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn and none latched: "${(text || '').slice(0, 60)}"`);
                 } else {
                   session.sent.push(intent);
                   const { property, to, from } = session;
