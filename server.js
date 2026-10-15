@@ -1006,18 +1006,38 @@ function isConsentAffirmative(text) {
 // ============================================================
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
+  // F-20261015-02. Accent-insensitive copy used for every test below. The model
+  // does not reliably produce accents, so "enviandote" and "enviandote" must both
+  // match. Stripping once beats doubling every pattern, and it cannot affect the
+  // English alternatives, which are pure ASCII.
+  const flat = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   // POST-CONSENT ONLY. We must match the phrase the AI says AFTER the caller agrees,
   // never the offer phrase. The prompt instructs the AI to say "I am sending you the
   // [tour/application/portal] link right now" once consent is given. Matching on the
   // gerund "sending" with a following object ("you the", "it now", "now") avoids the
   // offer-line false positive ("I would love to SEND you the tour link..."), which is
   // why links were arriving before the caller said yes.
-  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now)\b/.test(lower);
+  //
+  // SPANISH, added 2026-10-15 (F-20261015-02). Until then this regex was English
+  // only, so every Spanish caller was told a text was coming and never got one -
+  // 17 calls from 2026-07-08 onward, 8 of 9 checked had received nothing ever.
+  //
+  // The Spanish patterns are GERUND ONLY, for exactly the reason the English ones
+  // are. The real offer lines say "te envio", "te envie" or "enviarte"; only the
+  // send line says "estoy enviandote". Matching the offer would send links before
+  // consent - the same bug this rule was written to stop.
+  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now|estoy enviando|estoy enviandote|enviandote el enlace|enviando el enlace)\b/.test(flat);
   if (!isSendingNow) return null;
   // TOUR is checked FIRST so "I'm sending you the tour link and application link" maps to tour
-  if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
-  if (/\b(application|apply)\b/.test(lower)) return 'apply';
-  if (/\b(portal|service request|maintenance)\b/.test(lower)) return 'portal';
+  // Spanish type words taken from real transcripts: "enlace de la cita" and
+  // "enlace de la visita" for a tour, "enlace de la aplicacion" for the
+  // application, "enlace del portal" for the portal.
+  if (/\b(tour|schedule|book|visit|come see|calendly|cita|visita|recorrido)\b/.test(flat)) return 'tour';
+  // NOTE: bare "solicitud" is deliberately absent. It also means a service
+  // request, and apply is tested before portal, so it would steal maintenance
+  // sends and text a resident an application form.
+  if (/\b(application|apply|aplicacion|aplicar)\b/.test(flat)) return 'apply';
+  if (/\b(portal|service request|maintenance|mantenimiento)\b/.test(flat)) return 'portal';
   return null;
 }
 
