@@ -50,7 +50,19 @@ const PROPERTIES = {
     hours: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
     hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
-    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=4',
+    // APPLICATION LINK. This was locations=4 from 2026-07-16 until 2026-10-12,
+    // and locations=4 is not a Windsong application - it is a Rent Manager
+    // ERROR page ("Tenant Web Access has encountered an unexpected problem").
+    // Every Windsong caller who said yes to "want me to text you the
+    // application link?" got a dead link for nearly three months. Probed
+    // 2026-10-12: of locations=1..12 and 20, only locations=2 resolves. There
+    // is no Windsong-only link to find. locations=2 opens the shared Rent
+    // Manager form whose Property Selection dropdown lists North Mountain
+    // Foothills AND Windsong Alliance Group LLC, so the caller picks their own
+    // property - which is exactly what the website and the WordPress chatbot
+    // already send everyone to. Verify any future change by LOADING the URL,
+    // not by confirming that a text arrived.
+    apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 2 bedroom: twelve ninety five a month, all utilities included — NOT available right now.
@@ -217,6 +229,48 @@ const sessions = new Map();
 // SYSTEM PROMPT BUILDER (aligned with chat widget voice and rules)
 // ============================================================
 function buildSystemPrompt(property, content) {
+  // ── FAIR HOUSING ──────────────────────────────────────────────────────────
+  // Added 2026-10-12 (D-20261012-01). Until today this prompt contained NO
+  // fair-housing language of any kind: a search of both branches for fair
+  // housing / protected class / familial / disability / accommodation /
+  // discriminat / steering returned zero hits. This is the highest-exposure
+  // channel we run - live two-way conversation on both lines, in two
+  // languages, with no reviewer - and callers volunteer protected information
+  // unprompted. The block below is ported from the $rules string in
+  // fb-webhook.php (D-20261009-03), where the same gap produced "perfect for
+  // families" to a commenter who had just said he was a disabled senior.
+  //
+  // Two things to know before editing it:
+  //
+  // 1. It says it overrides anything BELOW it. In fb-webhook.php the
+  //    equivalent line said "above", because there the conflicting copy sat
+  //    earlier in the string. Here the thing it has to beat - SECTION 8 AND
+  //    HOME INC - is further down. Do not copy that word back.
+  //
+  // 3. PET POLICY, below, lists a 250 dollar pet fee and 35 a month pet rent,
+  //    and until 2026-10-12 said nothing about service animals - 0 hits in the
+  //    whole rendered prompt for service animal, ESA, emotional support or
+  //    "not charged". Charging a pet fee for a service animal is a plain
+  //    fair-housing violation, and the block below only caught it when the
+  //    caller framed it as a disability or an accommodation; framed as a pet
+  //    question it could route straight to the fee. Hence PETS is now named in
+  //    the override line above, and PET POLICY carries its own rule. Note this
+  //    prompt does NOT read pet_policy from the content store - it is hardcoded
+  //    here - and the store's pet_policy.spoken variant is missing the "are not
+  //    charged pet fees" clause that its .en and .es variants both carry
+  //    (F-20261012-03). Fix the store before wiring this to it.
+  //
+  // 2. The SECTION 8 hardship trigger list used to contain "single mom" and
+  //    "single dad" alongside "tight budget" and "low income". Those are
+  //    familial status, not budget. The agent was told to answer a caller
+  //    differently because she had disclosed being a single parent - a kind
+  //    response, but differential treatment on a protected characteristic
+  //    counts whichever direction it runs, and it contradicted this block
+  //    directly. Both phrases were removed and must not be restored. The
+  //    eight financial phrases still catch the real case: a single parent who
+  //    says money is tight hits "tight budget" like anyone else, and
+  //    accepting Section 8 is unchanged and still volunteered warmly. Source
+  //    of income is not a federally protected class; familial status is.
   const CC   = content || DEFAULT_CONTENT;
   const NM2  = CC.properties.nmfa.unit_types['2br'];       // NMFA 2-bedroom prices
   const WS2  = CC.properties.windsong.unit_types['2br'];   // Windsong 2-bedroom prices
@@ -282,6 +336,17 @@ function buildSystemPrompt(property, content) {
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
 
+FAIR HOUSING (NON-NEGOTIABLE - this overrides every other instruction in this prompt, including anything below about PETS, hardship, Section 8, or who the community suits):
+Describe the PROPERTY. Never describe the kind of person who should live in it. Federal law bans housing discrimination on race, color, religion, sex, disability, familial status and national origin, and steering a caller toward or away from a home because of any of those is illegal even when it is meant kindly.
+- NEVER say a home, amenity, community or neighborhood is "perfect for", "ideal for", "great for", "a great fit for" or "suited to" any group - families, children, seniors, students, singles, couples, professionals, retirees, disabled residents, or any nationality or faith. State the fact instead: "there are three schools within walking distance", never "ideal for families".
+- NEVER use "adult", "mature", "exclusive" or "no kids" to describe the community.
+- NEVER comment on, infer from, or repeat back a caller's family size, age, disability, religion, nationality, or whether they have children - even when they volunteer it, and even to sound welcoming. Stay warm, but answer the question they actually asked with the same facts you would give anyone.
+- If a caller asks whether the community is good for children, for seniors, or for any other group, do NOT give a verdict on the group. Say everyone is welcome to apply, then give the concrete fact they are really asking about - the bedroom counts, the square footage, the quiet hours, what is nearby - and let them decide.
+- If a caller mentions a disability, a service or assistance animal, or asks for an accommodation, do NOT assess it, do NOT ask what the condition is, and do NOT promise anything. Say:
+  - English: "Everyone is welcome to apply here. Our leasing team handles accommodation requests, and they will go through that with you directly."
+  - Spanish: "Todos son bienvenidos a aplicar aqui. Nuestro equipo de arrendamiento se encarga de las solicitudes de adaptacion, y lo revisaran contigo directamente."
+- Quote the same prices, the same availability, the same unit types and the same process to every caller who asks, no matter what they have told you about themselves.
+
 ============================================================
 UNITS — USE ONLY THIS INFORMATION
 ============================================================
@@ -304,6 +369,15 @@ MOVE-IN COST:
   - English: "Your move-in cost depends on your application and lease terms, so our leasing team will give you the exact numbers at the tour. The monthly price already includes all your utilities. Want me to text you the tour link?"
   - Spanish: "El costo de mudanza depende de tu solicitud y los términos del contrato, así que nuestro equipo te dará los números exactos en la visita. El precio mensual ya incluye todas tus utilidades. ¿Quieres que te envíe el enlace de la cita por texto?"
 
+REPAIRS — WHO PAYS (ASKED BY A PROSPECT, NOT ONLY A RESIDENT):
+- A prospect asking "what if something breaks", "who pays for repairs", or "are repairs included" gets the SAME answer a resident gets. This is not a maintenance call, but it is the same promise, and it is just as binding on us.
+- NEVER say repairs are "at no extra charge", "free", "no cost", "included in the lease" or "covered" with no condition attached. An unconditional answer is the problem, in any wording.
+- Say exactly this:
+  - English: "Routine repairs are covered unless the damage was caused by the resident, and the office decides that when they review the request."
+  - Spanish: "Las reparaciones de rutina están cubiertas a menos que el residente haya causado el daño, y la oficina lo determina al revisar su solicitud."
+- If they press for specifics — a named appliance, a dollar figure, or "so it is definitely free?" — say the leasing team goes through what the lease covers at the tour, and pivot to the tour.
+- Never quote a repair cost, a maintenance fee, or a deductible. We do not have those numbers on this line.
+
 CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 - This line is ${property.key === 'nmfa' ? 'North Mountain Foothills (NMFA)' : 'Windsong'}. It has 1-bedroom, 2-bedroom, and 3-bedroom units. ${availSentence}
 - Offer a tour or application ONLY for: ${offerableList}. If the caller asks about any other unit type, tell them it is not available right now, warmly offer one of the available types with its all-in price, and if they stay set on the type we do not have, offer the waiting list.
@@ -325,15 +399,37 @@ PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - NEVER say "they can offer", "the discount is", "you can get nine ninety five", or any specific lower number. Concessions are decided by the human agent during the tour. This rule exists to protect margin on every web channel and to give the human team a real closing tool.
 
 PET POLICY:
+STEP 1 - DECIDE WHAT KIND OF ANIMAL THIS IS. Do this BEFORE you say any number. Do not read the
+ORDINARY PETS section until you have decided.
+- If the caller says service animal, service dog, assistance animal, ESA, emotional support
+  animal, guide dog, or describes a task the animal does for them, it is NOT a pet. Give the
+  SERVICE ANIMAL answer below and STOP. Do not say the pet fee, the pet rent, the two-pet limit,
+  or any breed, size or weight restriction. Do not ask what their condition is and do not ask for
+  proof on the call.
+- If you cannot tell, ASK BEFORE QUOTING ANYTHING: "Just so I give you the right information, is
+  this a pet or a service or assistance animal?"
+- Only if it is an ordinary pet, use the ORDINARY PETS section.
+
+STEP 2 - SERVICE ANIMAL ANSWER (use this and nothing else):
+  - English: "Service animals and assistance animals are welcome with documentation, and they are not charged any pet fee or pet rent. Our leasing team handles that paperwork with you directly."
+  - Spanish: "Los animales de servicio y de apoyo emocional son bienvenidos con documentación, y no pagan ninguna cuota ni renta de mascota. Nuestro equipo de arrendamiento se encarga de ese papeleo contigo directamente."
+
+STEP 3 - ORDINARY PETS ONLY. Everything below applies ONLY after STEP 1 established this is an
+ordinary pet. If it is a service or assistance animal, none of it applies.
 - Dogs and cats welcome with prior written approval.
 - Thirty five dollars per month pet rent per pet, two hundred fifty dollar one-time pet fee.
 - Current vaccinations and license required.
 - For breed or size questions say: "Our team can go over the specifics when you tour."
 
+DO NOT REORDER THIS BLOCK. On 2026-10-15 the service-animal rule sat below the fees and the agent
+quoted a caller with a service dog thirty five dollars a month and two hundred fifty dollars, in
+English and in Spanish, because it read the list from the top. The decision has to come first.
+
 SECTION 8 AND HOME INC:
 - Both NMFA and Windsong accept Section 8 vouchers and HOME Inc.
-- If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "single mom", "single dad", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
+- If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
 - Do not immediately pitch units or the special after a hardship mention. Keep the conversation open.
+- A caller saying they are a single parent is NOT a hardship signal and must not change your reply. Be warm, say nothing about their family, and answer what they asked. If they separately say money is tight, the financial phrases above already cover it.
 
 ============================================================
 CONVERSATION PRINCIPLES
@@ -397,6 +493,7 @@ NO HOT WATER: Check breaker. If unresolved, direct to portal.
 THERMOSTAT: Check mode and batteries. If unresolved, direct to portal.
 WATER LEAK: Turn off supply valve immediately. Direct to portal right away.
 ALL OTHERS: Direct to portal. "Our team will follow up to schedule."
+COST (this applies in EVERY conversation, not only maintenance calls — a prospect asking who pays for repairs gets the same answer): Routine repairs ARE covered unless the resident caused the damage. You may state that general rule. You must NOT decide whether the caller's own repair is covered, because that depends on what caused it and only the office determines it. NEVER say "at no charge", "no cost", "free of charge", "that's covered" or "we cover that" about their specific repair, not even to reassure someone who says they will not pay. Say: "Routine repairs are covered unless the damage was caused by the resident, and the office decides that when they review the request." Spanish: "Las reparaciones de rutina están cubiertas a menos que el residente haya causado el daño, y la oficina lo determina al revisar su solicitud de mantenimiento." If they then ask whether their own repair is covered, say you cannot tell from the call and the office will determine it from the request. Then offer the portal link as normal. Never promise that anyone will call the resident back about cost.
 
 Whenever you direct a non-emergency issue to the portal, proactively offer to text the portal link on that same turn — do not wait for the caller to ask. Say: "Would you like me to text you the portal link so you can submit that easily?" Wait for consent ("yes", "sure", "okay", "please do") before sending. Once consent is given, say: "I am sending you the portal link right now."
 
@@ -518,9 +615,16 @@ function extractCallerName(session) {
   // Also strip leading inverted-Spanish punctuation that speech-to-text sometimes prepends
   // ("¿Marqués." should be captured as "Marqués", not "¿Marqués"). Bug fix 2026-05-15
   // after lead 370 landed with name="¿Marqués" (caller was Marcus).
+  // 2026-10-12 (lead 1291, Joanne): "to|for" added. The AI asked "Can I get your
+  // first name to send it to?" and she answered "To Joanne". isValidName_ tests
+  // every token against a phrase list that contains "to", so the WHOLE string was
+  // rejected and the lead landed with a blank name - while the AI went on calling
+  // her Joanne for the rest of the call. Stripping it here rather than loosening
+  // that list keeps the list strict: whatever is left still has to validate, so
+  // "To the office" becomes "the office" and is still rejected.
   const stripIntro = (s) => String(s).trim()
     .replace(/^[¿¡]+\s*/, '')
-    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '')
+    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es|to|for)\s+/i, '')
     .trim();
 
   // Walk turns. After each AI ask, grab the next caller turn and try to validate.
@@ -599,7 +703,13 @@ function isValidName_(s) {
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
-  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos)\b/i;
+  // Expanded again 2026-10-12 (lead 1296) with Spanish COURTESY and filler. The
+  // list was English-weighted: "thanks" was blocked, "gracias" was not, so a
+  // caller who answered the name ask with "Gracias." twice - plainly declining -
+  // was stored as a prospect named Gracias. Checked before adding: the \b anchor
+  // and the first-word-only test mean real names are untouched, so "Yamileth"
+  // survives "ya", "Nadia" survives "nada", and "Claudia" survives "claro".
+  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale)\b/i;
   // Strip accents (decompose + drop combining marks) so accented affirmations
   // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
   const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
@@ -632,7 +742,11 @@ function isValidName_(s) {
   // tighter set of function/intent words. Tokens of 1 character are skipped so
   // a middle initial ("Mary A Smith") still validates.
   const phrase = /^(from|to|with|about|for|and|the|my|me|near|by|looking|relocating|moving|searching|planning|hoping|checking|coming|arriving|interested|calling|trying|wanting|needing|new|newly|asap)$/i;
-  if (t.split(/\s+/).some(w => w.length > 1 && phrase.test(w))) return false;
+  // FIX 2026-10-12 (lead 1257: "And, hopefully, you'll have" was stored as a
+  // name). The tokens here carried their punctuation, so the token was "And,"
+  // and /^and$/ never matched. Strip punctuation per token before testing.
+  const bare = (w) => w.replace(/^[^A-Za-z\u00c0-\u00ff]+|[^A-Za-z\u00c0-\u00ff]+$/g, '');
+  if (t.split(/\s+/).some(w => bare(w).length > 1 && phrase.test(bare(w)))) return false;
   if (t.split(/\s+/).length > 4) return false;
   return true;
 }
@@ -744,7 +858,17 @@ async function postLeadToDashboard(session) {
 
   const callerName = extractCallerName(session);
 
-  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 4000)}`;
+  // TRANSCRIPT LENGTH. This was 4000 characters, which silently cut the end off
+  // 23 of 673 calls — and the end is where a call goes wrong. One truncated call
+  // stopped mid "press 9, then 1, then 1"; another cut off a caller saying "I said
+  // no already, you can hang up". Those are exactly the calls somebody needs to
+  // read in full.
+  //
+  // The column is MySQL TEXT, which holds 65,535 BYTES, not characters. Spanish
+  // accents cost two bytes each, so the ceiling in characters is lower than it
+  // looks. 15,000 characters cannot exceed the column even if every character were
+  // four bytes, and is roughly three times the longest call we have ever recorded.
+  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 15000)}`;
 
   // Generate the AI summary + action in parallel-ish with the network call.
   // Awaiting here adds ~1-2s to the post-call writeback, which is fine
@@ -886,23 +1010,63 @@ function isConsentAffirmative(text) {
   return /\b(yes|yeah|yep|yup|sure|ok|okay|okey|please|go ahead|sounds good|that works|works for me|absolutely|definitely|of course|si|sí|claro|dale|por favor|esta bien|está bien|perfecto|adelante)\b/.test(t);
 }
 
+// Did THIS assistant line offer to text the caller something? Used to decide
+// whether a following "yes" is consent to be texted, as opposed to a "yes" to
+// some unrelated question ("Si, de 2 recamaras"). Requires BOTH a send/text verb
+// and the thing being sent, so ordinary sentences that merely contain "send"
+// do not qualify. Accent-flattened for the same reason detectSmsIntent is.
+function offersToText(text) {
+  if (!text) return false;
+  const flat = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const offersSend = /\b(send|sending|text you|envio|envie|enviar|enviarte|enviando|enviandote|mandar|mandarte|mando)\b/.test(flat);
+  const theThing   = /\b(link|enlace|text|texto|mensaje|sms)\b/.test(flat);
+  return offersSend && theThing;
+}
+
 // ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
+  // F-20261015-02. Accent-insensitive copy used for every test below. The model
+  // does not reliably produce accents, so "enviandote" and "enviandote" must both
+  // match. Stripping once beats doubling every pattern, and it cannot affect the
+  // English alternatives, which are pure ASCII.
+  const flat = lower.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   // POST-CONSENT ONLY. We must match the phrase the AI says AFTER the caller agrees,
   // never the offer phrase. The prompt instructs the AI to say "I am sending you the
   // [tour/application/portal] link right now" once consent is given. Matching on the
   // gerund "sending" with a following object ("you the", "it now", "now") avoids the
   // offer-line false positive ("I would love to SEND you the tour link..."), which is
   // why links were arriving before the caller said yes.
-  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now)\b/.test(lower);
+  //
+  // SPANISH, added 2026-10-15 (F-20261015-02). Until then this regex was English
+  // only, so every Spanish caller was told a text was coming and never got one -
+  // 17 calls from 2026-07-08 onward, 8 of 9 checked had received nothing ever.
+  //
+  // The Spanish patterns are GERUND ONLY, for exactly the reason the English ones
+  // are. The real offer lines say "te envio", "te envie" or "enviarte"; only the
+  // send line says "estoy enviandote". Matching the offer would send links before
+  // consent - the same bug this rule was written to stop.
+  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now|estoy enviando|estoy enviandote|enviandote el enlace|enviando el enlace)\b/.test(flat);
   if (!isSendingNow) return null;
   // TOUR is checked FIRST so "I'm sending you the tour link and application link" maps to tour
-  if (/\b(tour|schedule|book|visit|come see|calendly)\b/.test(lower)) return 'tour';
-  if (/\b(application|apply)\b/.test(lower)) return 'apply';
-  if (/\b(portal|service request|maintenance)\b/.test(lower)) return 'portal';
+  // Spanish type words taken from real transcripts: "enlace de la cita" and
+  // "enlace de la visita" for a tour, "enlace de la aplicacion" for the
+  // application, "enlace del portal" for the portal.
+  if (/\b(tour|schedule|book|visit|come see|calendly|cita|visita|recorrido)\b/.test(flat)) return 'tour';
+  // NOTE: bare "solicitud" is deliberately absent. It also means a service
+  // request, and apply is tested before portal, so it would steal maintenance
+  // sends and text a resident an application form.
+  // "solicitud" is what the Spanish agent actually calls the application
+  // ("el enlace de la solicitud"). It ALSO means a maintenance service request,
+  // and apply is tested BEFORE portal, so it only counts as the application when
+  // nothing in the line points at maintenance. Excluding it outright (as
+  // D-20261015-02 did) meant the Spanish apply link could never send at all.
+  if (/\b(application|apply|aplicacion|aplicar)\b/.test(flat) ||
+      (/\bsolicitud(es)?\b/.test(flat) &&
+       !/\b(mantenimiento|portal|service request|reparacion|reparaciones)\b/.test(flat))) return 'apply';
+  if (/\b(portal|service request|maintenance|mantenimiento)\b/.test(flat)) return 'portal';
   return null;
 }
 
@@ -1042,6 +1206,9 @@ fastify.register(async function(fastify) {
             isSpanish: false,
             languageSwitched: false,
             sent: [],
+            // Set once the caller says an explicit yes to an offer to text them.
+            // See the gate below: consent survives the agent asking their name.
+            smsConsent: false,
             activeStream: null,
             conversation: [
               { role: 'system', content: buildSystemPrompt(property, content) }
@@ -1075,6 +1242,21 @@ fastify.register(async function(fastify) {
               ttsLanguage: 'es-US',
               transcriptionLanguage: 'es-US'
             }));
+          }
+
+          // CONSENT LATCH (2026-10-15). If this caller turn is an explicit yes
+          // AND the assistant line it answers offered to text them, remember it
+          // for the rest of the call. Without this, the agent asking "and your
+          // name?" between the yes and the send silently voided the consent and
+          // no link was ever sent - which is what happened on every Spanish call
+          // that reached the name question.
+          if (!session.smsConsent && isConsentAffirmative(text)) {
+            const answering = [...session.conversation].reverse()
+              .find(m => m.role === 'assistant');
+            if (answering && offersToText(answering.content)) {
+              session.smsConsent = true;
+              console.log('SMS consent latched for this call (caller said yes to a texting offer)');
+            }
           }
 
           session.conversation.push({ role: 'user', content: text });
@@ -1123,8 +1305,11 @@ fastify.register(async function(fastify) {
               if (intent && !session.sent.includes(intent) && session.from) {
                 // A2P 10DLC backstop: tour/apply links require an explicit affirmative
                 // on the caller's triggering turn. Portal is resident-requested, not gated.
-                if ((intent === 'tour' || intent === 'apply') && !isConsentAffirmative(text)) {
-                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn: "${(text || '').slice(0, 60)}"`);
+                // Consent counts if it is on THIS turn (original behaviour, kept)
+                // or was latched earlier in the call against a texting offer.
+                const consented = isConsentAffirmative(text) || session.smsConsent === true;
+                if ((intent === 'tour' || intent === 'apply') && !consented) {
+                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn and none latched: "${(text || '').slice(0, 60)}"`);
                 } else {
                   session.sent.push(intent);
                   const { property, to, from } = session;
