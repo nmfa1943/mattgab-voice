@@ -34,7 +34,7 @@ const PROPERTIES = {
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
 2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
-1 bedroom: nine ninety five a month, all utilities included — NOT available right now.
+1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included. AVAILABLE NOW.
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
@@ -66,7 +66,7 @@ const PROPERTIES = {
     units: `
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 2 bedroom: twelve ninety five a month, all utilities included — NOT available right now.
-1 bedroom: nine ninety five a month, all utilities included — NOT available right now, all leased.`,
+1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now, all leased.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
   }
@@ -200,7 +200,7 @@ function renderUnitsBlock(key, content) {
   // All-in spoken price per unit, read from content; fall back to the historical
   // literal if the store lacks it (behavior-preserving).
   const sp = (u, fb) => (p.unit_types[u] && p.unit_types[u].utils_spoken) ? p.unit_types[u].utils_spoken : fb;
-  const oneBR = sp('1br', 'nine ninety five'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'eighteen hundred');
+  const oneBR = sp('1br', 'one thousand three hundred dollars'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'eighteen hundred');
   // AVAILABILITY IS NOW DRIVEN BY THE STORE (2026-09-02). Both return statements
   // here used to hardcode "AVAILABLE NOW" per unit type, which is why marking a
   // type unavailable in content.json changed its price everywhere and its
@@ -281,8 +281,8 @@ function buildSystemPrompt(property, content) {
   const NM3 = CC.properties.nmfa.unit_types['3br'] || {};
   const WS1 = CC.properties.windsong.unit_types['1br'] || {};
   const spk = (u, fb) => (u && u.utils_spoken) ? u.utils_spoken : fb;
-  const nm1p = spk(NM1, 'nine ninety five'), nm2p = spk(NM2, 'twelve ninety five'), nm3p = spk(NM3, 'eighteen hundred');
-  const ws1p = spk(WS1, 'nine ninety five'), ws2p = spk(WS2, 'twelve ninety five'), ws3p = spk(WS3, 'eighteen hundred');
+  const nm1p = spk(NM1, 'one thousand three hundred dollars'), nm2p = spk(NM2, 'twelve ninety five'), nm3p = spk(NM3, 'eighteen hundred');
+  const ws1p = spk(WS1, 'one thousand three hundred dollars'), ws2p = spk(WS2, 'twelve ninety five'), ws3p = spk(WS3, 'eighteen hundred');
   const OBS  = CC.obsolete_figures || [];
   const OBSX = CC.obsolete_figures_pronunciation_extra || [];
   // "a", "b", or "c"  — matches the exact prose format used in the prompt.
@@ -361,7 +361,7 @@ ${unitLines}
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
-- If the caller says they saw a lower price or "nine ninety five": that is our one-bedroom, all utilities included. ${lowPriceRule} NEVER offer or price a unit that is not AVAILABLE NOW.
+- If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer or price a unit that is not AVAILABLE NOW.
 
 MOVE-IN COST:
 - "All utilities included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.
