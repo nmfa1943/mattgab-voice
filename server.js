@@ -710,6 +710,17 @@ function buildTurnSystemHints(conversation, opts) {
   if (opts.isSpanish && recentEmergency && isMaintenanceCall(conversation, { recentUserTurns: 3 })) {
     suffix += '\n\nTHIS TURN ONLY: this is a maintenance EMERGENCY. Give the Maintenance line immediately. If you reply in Spanish, use formal usted: "' + MAINT_EMERGENCY_ES + '"';
   }
+  // Pass 10: a plain 2-bedroom price question (alone, or with "market / regular price" or the deposit) is answered with BOTH options.
+  {
+    const q10 = twoBrPriceQuestion_(conversation);
+    const key10 = opts.property && opts.property.key;
+    let c10 = opts.content;
+    if (!c10 && typeof CONTENT_CACHE !== 'undefined') c10 = CONTENT_CACHE;
+    const p10 = q10 && key10 && c10 ? twoBrPriceParts_(c10, key10, !!opts.isSpanish) : null;
+    if (p10) {
+      suffix += '\n\nTHIS TURN ONLY: the caller is asking the 2 bedroom price' + (q10.market ? ' and what the market or regular price is' : '') + '. Do NOT answer with the approval sentence. Say both lease options in one sentence, in this order: "' + p10.price + '"' + (q10.market ? ' Then say plainly: "' + p10.current + '" Never mention any other figure or a higher price.' : '') + (q10.deposit && p10.deposit ? ' The caller also asked about the deposit / move-in cost, so then say: "' + p10.deposit + '"' : '') + (opts.isSpanish ? ' Say every number in Spanish or digits, never English number words.' : '');
+    }
+  }
   if (opts.isSpanish) {
     suffix += '\n\nTHIS TURN ONLY: this call has been conducted in Spanish. Whenever you speak Spanish, speak ONLY formal usted: use usted, le, su, and verbs in the usted form (puede, quiere, desea, llame, escriba). Never use the tú forms tú, te, ti, tu, tus, contigo, puedes, quieres, tienes, llama, escribe.';
   }
@@ -1066,6 +1077,205 @@ function stripMarketRentWording_(text, opts) {
   return replyIsSpanish_(t, opts.isSpanish) ? NO_SPECIAL_REPLY_ES : NO_SPECIAL_REPLY_EN;
 }
 
+// ---------------------------------------------------------------------------
+// Pass 10 (2026-11-11): the 2-bedroom price question is always answered with BOTH lease
+// options, in English and in Spanish, even when the model drifts or a guard above dropped
+// the whole reply; and Spanish replies never carry English number words.
+// ---------------------------------------------------------------------------
+const P10_OTHER_BED_RE_ = /\b(?:(?:one|1|three|3)[\s-]*(?:bed(?:room)?s?|br)|studio|(?:uno|una|tres|1|3)\s+(?:rec[aá]maras?|dormitorios?|habitaciones?|cuartos?)|estudio)\b/i;
+const P10_TWO_BED_RE_ = /\b(?:(?:two|2)[\s-]*(?:bed(?:room)?s?|br)|dos\s+(?:rec[aá]maras?|dormitorios?|habitaciones?|cuartos?|alcobas?|camas?)|2\s*(?:rec[aá]maras?|dormitorios?|habitaciones?|cuartos?))\b/i;
+// "price" nouns (also fine next to a deposit question) and generic "how much / cost" wording (only when no deposit is asked).
+// A bare verb "rent" ("I want to rent a two bedroom") is not a price question.
+const P10_PRICE_NOUN_RE_ = /\b(?:prices?|pricing|precios?|cuestan?|vale|valen|(?:the|monthly|your|su|la|mi)\s+(?:rent|renta)|(?:rent|renta)\s+(?:price|cost|amount))\b/i;
+const P10_PRICE_GENERIC_RE_ = /\b(?:how\s+much|cu[aá]nto|costs?|costos?|cobran)\b/i;
+const P10_MARKET_RE_ = /\b(?:market|regular|normal|usual|real|actual|true|mercado|habitual|verdader[oa])\b/i;
+// Questions that belong to the model / other rules, not to the plain price answer.
+const P10_SKIP_RE_ = /\b(?:special|specials|promo\w*|discount\w*|deals?|concessions?|catch|conditions?|best\s+you\s+can|negotiat\w*|flexible|lower|cheaper|descuento\w*|promoci\w*|ofertas?|especial(?:es)?|condiciones|lo\s+mejor\s+que|negoci\w*|flexible|rebaja\w*|due|late|vence|vencimiento|pagar|pago|pets?|mascotas?|fees?|cuotas?|parking|estacionamiento|utilities|utilidades|servicios)\b|\$|\d{3,}|hundred|thousand|\bmil\b|ninety|noventa|quinientos|doscientos|cents?\b|centavos/i;
+const P10_DEPOSIT_RE_ = /\b(?:deposit|move[\s-]*in|dep[oó]sito|mudanza)\b/i;
+const P10_SIXMO_RE_ = /\b(?:six|6)[\s-]*month|\bseis\s+meses|\b6\s*meses/i;
+
+// Classify the caller's last turn. Returns null, or { market, deposit, six, text }.
+// Only a plain price question about the 2 bedroom counts (named in the turn, or the unit just discussed);
+// specials / discounts / readbacks / rent due / pets / other bedroom sizes go back to the model and the other rules.
+const P10_DEPOSIT_PHRASE_RE_ = /cost\s+(?:to|of)\s+move[\s-]*in|move[\s-]*in\s+cost|costo\s+de\s+(?:la\s+)?mudanza|costo\s+(?:para|de)\s+mudarse|\bdeposit\w*|\bdeposito\w*|\bmudanza\b|\bmove[\s-]*in\b|\bmudarse\b/gi;
+function twoBrPriceQuestion_(conversation) {
+  const msgs = (conversation || []).filter(m => m && typeof m.content === 'string' && m.role !== 'system');
+  let li = -1;
+  for (let i = msgs.length - 1; i >= 0; i--) { if (msgs[i].role === 'user') { li = i; break; } }
+  if (li < 0) return null;
+  const last = msgs[li].content;
+  const n = normalizeForMatch_(last);
+  const nDep = n.replace(P10_DEPOSIT_PHRASE_RE_, ' ');
+  const depAsked = P10_DEPOSIT_RE_.test(n);
+  if (!(P10_PRICE_NOUN_RE_.test(nDep) || (!depAsked && P10_PRICE_GENERIC_RE_.test(nDep)))) return null;
+  if (P10_SKIP_RE_.test(nDep)) return null;
+  if (P10_OTHER_BED_RE_.test(n)) return null;
+  if (!P10_TWO_BED_RE_.test(n)) {
+    // no size in this turn: only when the 2 bedroom is the unit just discussed
+    const prev = msgs.slice(Math.max(0, li - 6), li).map(m => normalizeForMatch_(m.content)).join(' ');
+    if (!P10_TWO_BED_RE_.test(prev) || P10_OTHER_BED_RE_.test(prev)) return null;
+  }
+  return { market: P10_MARKET_RE_.test(nDep), deposit: P10_DEPOSIT_RE_.test(n), six: P10_SIXMO_RE_.test(n), text: last };
+}
+
+// The store-driven 2BR sentences, or null when the property has no available two-term 2BR.
+function twoBrPriceParts_(content, propKey, isSpanish) {
+  const p = content && content.properties && content.properties[propKey];
+  const ut = p && p.unit_types && p.unit_types['2br'];
+  if (!ut || !sixMonthOption_(ut)) return null;
+  const avail = Array.isArray(p.available_types) ? p.available_types : Object.keys(p.unit_types).filter(t => p.unit_types[t] && p.unit_types[t].quotable);
+  if (avail.indexOf('2br') === -1) return null;
+  if (isUsingFallbackContent(content)) return null;
+  let price;
+  if (isSpanish) {
+    const es = twoTermPriceTextEs_(ut);
+    if (!es) return null;
+    price = 'El apartamento de dos recámaras cuesta ' + es + ', con todos los servicios incluidos.';
+  } else {
+    price = 'The two bedroom is ' + twoTermPriceText_(ut, '') + ', all utilities included.';
+  }
+  const dep = moveInCostLines_(propKey, content).filter(l => l.type === '2br')[0] || null;
+  return {
+    ut: ut,
+    price: price,
+    current: isSpanish ? 'Esos son nuestros precios actuales.' : 'Those are our current prices.',
+    tour: isSpanish ? '¿Desea que le envíe el enlace de la cita por texto?' : 'Want me to text you the tour link so you can come see it?',
+    deposit: dep ? (isSpanish ? dep.es : dep.en) : '',
+    depositSix: dep ? (isSpanish ? dep.sixEs : dep.sixEn) : ''
+  };
+}
+
+function p10SpanishWordsOfInt_(n) {
+  const u = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciséis', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte', 'veintiuno', 'veintidós', 'veintitrés', 'veinticuatro', 'veinticinco', 'veintiséis', 'veintisiete', 'veintiocho', 'veintinueve'];
+  const t = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+  const h = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+  if (n < 30) return u[n];
+  if (n < 100) return t[Math.floor(n / 10)] + (n % 10 ? ' y ' + u[n % 10] : '');
+  if (n === 100) return 'cien';
+  if (n < 1000) return h[Math.floor(n / 100)] + (n % 100 ? ' ' + p10SpanishWordsOfInt_(n % 100) : '');
+  if (n < 10000) { const th = Math.floor(n / 1000); return (th === 1 ? 'mil' : u[th] + ' mil') + (n % 1000 ? ' ' + p10SpanishWordsOfInt_(n % 1000) : ''); }
+  return String(n);
+}
+// Does the reply already state this whole-dollar figure (digits, English words or Spanish words)?
+function p10HasFigure_(text, n) {
+  const re = moneyFormsRegex_(n);
+  const t = String(text || '');
+  if (re && new RegExp(re, 'i').test(t)) return true;
+  const es = p10SpanishWordsOfInt_(n);
+  return new RegExp('\\b' + es.replace(/\s+/g, '\\s+') + '\\b', 'i').test(normalizeForMatch_(t).replace(/\s+/g, ' ')) ||
+    new RegExp('\\b' + normalizeForMatch_(es).replace(/\s+/g, '\\s+') + '\\b', 'i').test(normalizeForMatch_(t));
+}
+
+// Guard: when the caller's last turn asks the 2-bedroom price (alone, with "market / regular price", or with the
+// deposit), the spoken reply states BOTH lease options. If it does not (the model drifted, gave one option, or a guard
+// above dropped the whole reply to the approval line), the store-driven price sentence replaces the price part.
+// "That is the market price" gets a plain "Those are our current prices." and never a higher figure.
+function ensureTwoBrPriceAnswered_(text, conversation, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  const q = twoBrPriceQuestion_(conversation);
+  if (!q) return t;
+  let content = opts.content;
+  if (!content && typeof CONTENT_CACHE !== 'undefined') content = CONTENT_CACHE;
+  const key = opts.property && opts.property.key;
+  if (!content || !key) return t;
+  const isEs = replyIsSpanish_(t, opts.isSpanish) || (!!opts.isSpanish && !/[a-z]/i.test(t));
+  const parts = twoBrPriceParts_(content, key, isEs);
+  if (!parts) return t;
+  const n12 = parts.ut.std12_utils_num, n6 = parts.ut.utils_num;
+  const has12 = p10HasFigure_(t, n12), has6 = p10HasFigure_(t, n6);
+  const sents = splitSentences_(t);
+  const isApproval = (sn) => sn.replace(/\s+/g, ' ').trim() === NO_SPECIAL_REPLY_EN || sn.replace(/\s+/g, ' ').trim() === NO_SPECIAL_REPLY_ES;
+  const hasCurrent = (x) => /current prices|precios actuales/i.test(normalizeForMatch_(x));
+  let out;
+  if (has12 && has6) {
+    // both options already spoken; for a market / regular price question the approval line goes and "current prices" is said plainly
+    let ps = q.market ? sents.filter(sn => !isApproval(sn)) : sents.slice();
+    if (!ps.length) ps = [parts.price];
+    if (q.market && !hasCurrent(ps.join(' '))) {
+      let at = -1;
+      for (let i = 0; i < ps.length; i++) {
+        if (!P10_DEPOSIT_RE_.test(ps[i]) && (p10HasFigure_(ps[i], n12) || p10HasFigure_(ps[i], n6))) at = i;
+      }
+      ps.splice(at + 1, 0, parts.current);
+    }
+    out = ps.join(' ');
+  } else {
+    // drop approval-line sentences and sentences that carry only part of the 2BR price
+    const kept = sents.filter(sn => {
+      if (isApproval(sn)) return false;
+      const topicMoney = P10_DEPOSIT_RE_.test(sn) || /\b(pet|pets|mascota|mascotas)\b/i.test(sn);
+      if (!topicMoney && (p10HasFigure_(sn, n12) || p10HasFigure_(sn, n6))) return false;
+      return true;
+    });
+    out = parts.price + (q.market ? ' ' + parts.current : '') + (kept.length ? ' ' + kept.join(' ') : '');
+    if (!kept.length) out = out + ' ' + parts.tour;
+  }
+  // deposit / move-in asked in the same turn: make sure it is answered (the line carries its own qualifier)
+  if (q.deposit && parts.deposit && !P10_DEPOSIT_RE_.test(normalizeForMatch_(out))) {
+    const add = (q.six && parts.depositSix ? parts.deposit + ' ' + parts.depositSix : parts.deposit);
+    const ps = splitSentences_(out);
+    const lastS = ps[ps.length - 1] || '';
+    if (ps.length > 1 && /[?¿]/.test(lastS)) { ps.splice(ps.length - 1, 0, add); out = ps.join(' '); }
+    else out = out + ' ' + add;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+// English number words -> digits (0-9999). Returns null when it cannot parse.
+function p10EnWordsToInt_(phrase) {
+  const small = { zero: 0, oh: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19 };
+  const tens = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
+  const toks = String(phrase).toLowerCase().split(/[\s,-]+/).filter(w => w && w !== 'and');
+  if (!toks.length) return null;
+  // spoken digits ("one zero four")
+  if (toks.length >= 2 && toks.every(w => w in small && small[w] <= 9)) return toks.map(w => String(small[w])).join('');
+  let total = 0, cur = 0;
+  for (const w of toks) {
+    if (w in small) cur += small[w];
+    else if (w in tens) cur += tens[w];
+    else if (w === 'hundred') cur = (cur || 1) * 100;
+    else if (w === 'thousand') { total += (cur || 1) * 1000; cur = 0; }
+    else return null;
+  }
+  return String(total + cur);
+}
+const P10_EN_NUM_ = '(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)';
+const P10_EN_PHRASE_ = P10_EN_NUM_ + '(?:[\\s,-]+(?:and[\\s]+)?' + P10_EN_NUM_ + ')*';
+const P10_MONTHS_ES_ = { 3: 'tres', 6: 'seis', 9: 'nueve', 12: 'doce', 18: 'dieciocho', 24: 'veinticuatro' };
+
+// Guard: a Spanish sentence never carries English number words ("contrato de twelve meses", "six meses",
+// "unidad one hundred and four", "one thousand five hundred dollars"). Lease months become Spanish words;
+// unit numbers and dollar amounts become digits.
+function fixSpanishNumerals_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || !new RegExp('\\b' + P10_EN_NUM_ + '\\b', 'i').test(t)) return t;
+  const fixed = splitSentences_(t).map(sn => {
+    if (!new RegExp('\\b' + P10_EN_NUM_ + '\\b', 'i').test(sn)) return sn;
+    const spanishish = /\b(meses|mes|unidad|contrato|departamento|apartamento|d[oó]lares|al\s+mes|su|le|el|la|con|de)\b/i.test(sn) && replyIsSpanish_(sn, false);
+    if (!spanishish) return sn;
+    let s = sn;
+    // lease months: "twelve meses", "contrato de six months", "six-month"
+    s = s.replace(new RegExp('\\b(' + P10_EN_PHRASE_ + ')[\\s-]+(?:meses|mes|months?)\\b', 'ig'), (m, w) => {
+      const n = Number(p10EnWordsToInt_(w));
+      return P10_MONTHS_ES_[n] ? P10_MONTHS_ES_[n] + (n === 1 ? ' mes' : ' meses') : (n ? n + ' meses' : m);
+    });
+    // unit / apartment numbers
+    s = s.replace(new RegExp('\\b(unidad|apartamento|departamento|apto\\.?|n[uú]mero|#)\\s*(?:n[uú]mero\\s+)?(' + P10_EN_PHRASE_ + ')\\b', 'ig'), (m, lab, w) => {
+      const n = p10EnWordsToInt_(w);
+      return n ? lab + ' ' + n : m;
+    });
+    // dollar amounts
+    s = s.replace(new RegExp('\\b(' + P10_EN_PHRASE_ + ')\\s+(?:dollars?|d[oó]lares)\\b', 'ig'), (m, w) => {
+      const n = Number(p10EnWordsToInt_(w));
+      return n ? '$' + n.toLocaleString('en-US') : m;
+    });
+    return s;
+  });
+  return fixed.join(' ');
+}
+
 const MAINT_EXT_PRESENT_RE_ = /(?:extension|extensi[oó]n|ext\.?)\s*(?:three|3|tres)\b/i;
 
 // Guard: a maintenance call (emergency or not) always hears extension 3 once.
@@ -1098,6 +1308,8 @@ function commitAssistantReply(session, rawText, opts) {
   spoken = stripConcessionWording_(spoken, opts);
   spoken = stripGoodFaithWording_(spoken, opts);
   spoken = stripMarketRentWording_(spoken, opts);
+  spoken = ensureTwoBrPriceAnswered_(spoken, session.conversation, opts);
+  spoken = fixSpanishNumerals_(spoken, opts);
   spoken = ensureQuoteQualifier_(spoken, Object.assign({ quoteQualifierEn: storeQ.en, quoteQualifierEs: storeQ.es }, opts));
   spoken = ensureMaintenanceExtension_(spoken, session.conversation, opts);
   session.conversation = session.conversation || [];
@@ -1175,7 +1387,7 @@ function runPromptPipeline(session, userText, modelText, opts) {
       return { spoken: spoken, intercepted: factualIntent, hints: '', aborted: false, bargeIn: null, preAbort: preAbort };
     }
   }
-  const hints = buildTurnSystemHints(session.conversation, { isSpanish: !!session.isSpanish });
+  const hints = buildTurnSystemHints(session.conversation, { isSpanish: !!session.isSpanish, property: session.property });
   if (opts.abortBeforeSend) {
     const outcome = handleBargeIn(session, modelText, { isSpanish: session.isSpanish });
     return { spoken: '', intercepted: null, hints: hints, aborted: true, bargeIn: outcome, preAbort: preAbort };
@@ -1367,9 +1579,9 @@ function buildSystemPrompt(property, content) {
         promoUnits.map(t => UNIT_LABEL[t] + ' "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included"').join('; ') +
         '. These are our two ongoing lease options, said plainly with no extra framing. Do not recommend one over the other and never say either can change. If the caller asks whether the six-month price is a special or a promotion, say it is simply one of our two lease options, then go back to the tour. In Spanish always use usted: ' +
         promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El apartamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con todos los servicios incluidos."' : ''; }).filter(Boolean).join(' ') +
-        ' Then go back to the tour.';
+        ' In Spanish say the lease lengths as "12 meses" and "6 meses" (or "doce meses" and "seis meses"). Never use English number words inside Spanish, such as "twelve meses", "six meses", "contrato de twelve" or "one hundred and four"; say a unit number as digits, for example "unidad 104". Then go back to the tour.';
     // Pass 8: the phone agent never speaks a market rent or a "regular" price.
-    const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead.';
+    const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead. If the caller asks what the market, regular or comparison price is (alone or together with the price), do NOT use the approval sentence and do NOT refuse: say plainly that the listed prices are our current prices ("Those are our current prices." / "Esos son nuestros precios actuales.") and give the unit\'s listed lease option(s) exactly as listed, with no other figure.';
     // Pass 9: with two live lease terms, a caller who repeats a listed price WITH its lease term is
     // confirmed; a misheard (cents / decimal) or mismatched repeat is corrected to the right term.
     const NUM2 = PUT['2br'] || {};
@@ -1447,6 +1659,7 @@ CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 
 CONDITIONS:
 - If a caller asks "what are the conditions", "is that a special", or "any catch", say: "Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour." Do not invent specific conditions or lease-length requirements.
+- A question about the PRICE of a unit, or about the regular or comparison price, or the price together with the deposit, is NOT a conditions question: give the listed price(s) (both 2-bedroom lease options together, and the deposit / move-in figures if asked) and never answer with the approval sentence alone.
 - PRECEDENCE for "is that a special?": if the caller asks whether the six-month price, the twelve-month price or either lease option is a special, a promotion or a deal, answer FIRST with "It is simply one of our two lease options" and THEN add the approval sentence above. This wins over the general conditions line. For any other special / catch / conditions question use the approval sentence alone.
 - Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
 
@@ -2365,7 +2578,7 @@ fastify.register(async function(fastify) {
           try {
             let fullResponse = '';
             let aborted = false;
-            let systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish });
+            let systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish, property: session.property });
             const stream = anthropic.messages.stream({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 200,
