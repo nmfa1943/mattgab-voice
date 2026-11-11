@@ -37,7 +37,7 @@ const twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
 // prompt unit lines, the pricing rules, the move-in cost lines and the static
 // PROPERTIES units text. 1BR and 3BR are twelve-month only and never change.
 // Neither option is ever framed as a special, promo or limited-time price.
-// Changing it needs Jenea's written approval and a new md5.
+// Needs Jenea's written approval and a new md5 to change; the lead-6 file ships in upload/variants/.
 // ============================================================
 const TWO_BR_LEAD_TERM = 12;
 const TWO_BR_12_STATIC_ = 'one thousand, five hundred dollars a month on a twelve-month lease';
@@ -725,13 +725,12 @@ function quoteQualifier_(content, isSpanish) {
   return (q && q.en) || QUOTE_QUALIFIER_EN;
 }
 
-// The price the agent leads with is ALWAYS the twelve-month price
-// (std12_utils_*), falling back to utils_* when a unit has no separate
-// twelve-month figure (1BR / 3BR are twelve-month only, so both are equal).
-// The store's price_note and lead_term fields are NOT read: Jenea decided
-// 2026-11-11 that the agent matches the office staff and leads with twelve months.
-// Pass 6: TWO_BR_LEAD_TERM (top of file) picks the lead term for any unit that
-// has a distinct six-month promo (the 2-bedroom). 1BR / 3BR never change.
+// Which price is spoken FIRST is set by TWO_BR_LEAD_TERM (top of file; default 12 = the
+// twelve-month price, std12_utils_*; 6 = the six-month price, utils_*). Pass 8/9: a unit with
+// a distinct, cheaper shorter term (the 2-bedroom) is ALWAYS given with both options together;
+// the constant only orders them. For single-term units (1BR / 3BR) the twelve-month price
+// std12_utils_* is used, falling back to utils_* (both are equal there).
+// The store's price_note and lead_term fields are NOT read.
 function leadsWithSix_(ut) {
   return TWO_BR_LEAD_TERM === 6 && !!sixMonthOption_(ut);
 }
@@ -1017,9 +1016,33 @@ function marketRentRegex_(content) {
   return srcs.length ? new RegExp('(?:' + srcs.join('|') + ')', 'i') : /$^/;
 }
 const MARKET_WORDING_RE_ = /\bmarket[\s-]*(?:rent|rate|price|value)s?\b|\bmarket_num\b|\brenta\s+de\s+mercado\b|\bprecio\s+de\s+mercado\b|\btachad[oa]\b|\bcrossed[\s-]*out\b|\bstruck[\s-]*through\b/i;
-const REGULAR_PRICE_RE_ = /\b(?:regularly|normally|usually|typically|ordinarily|originally|regular\s+(?:price|rent|rate)|normal\s+(?:price|rent|rate)|usual\s+(?:price|rent|rate)|regularmente|normalmente|usualmente|precio\s+(?:regular|normal))\b/i;
-const PROMO_FRAMING_RE_ = /\b(?:limited[\s-]*time|for\s+now|promo(?:tion|tional)?s?|special\s+(?:price|rate|offer|pricing|deal)|temporar(?:y|ily)|seasonal|introductory|oferta\s+especial|por\s+tiempo\s+limitado|por\s+ahora|promoci[oó]n)\b/i;
-const PRICE_CONTEXT_RE_ = /\$\s?\d|\b\d{3,}\b|\bhundred\b|\bthousand\b|\bmil\b|\b(?:rent|price|rate|lease|month|renta|precio|contrato|mes)\b/i;
+// "regularly / normally ..." wording only counts when it sits right next to a dollar figure.
+const REGULAR_PRICE_RE_ = /\b(?:regularly|normally|usually|typically|ordinarily|originally|regular\s+(?:price|rent|rate)|normal\s+(?:price|rent|rate)|usual\s+(?:price|rent|rate)|regularmente|normalmente|usualmente|precio\s+(?:regular|normal))\b/gi;
+// Promo / limited-time framing. STRONG phrases describe a price by themselves ("special rate", "limited time",
+// "promotion", "temporary price") and are dropped wherever they appear. Bare "temporarily"/"temporary" is NOT here:
+// it only counts when it describes the price itself. WEAK phrases ("for now", "seasonal", "introductory") are
+// dropped only when they sit next to a dollar figure.
+const PROMO_STRONG_RE_ = /\b(?:limited[\s-]*time|promo(?:tion|tional)?s?|special\s+(?:price|rate|offer|pricing|deal)|temporar(?:y|ily)\s+(?:price|rate|rent|pricing|offer|discount|lower|reduced|discounted)|(?:price|rate|rent|pricing|offer)\s+(?:is|are)\s+temporar(?:y|ily)|oferta\s+especial|por\s+tiempo\s+limitado|promoci[oó]n)\b/i;
+const PROMO_FRAMING_RE_ = /\b(?:for\s+now|seasonal|introductory|por\s+ahora)\b/gi;
+// A real dollar figure: "$1,500", "five hundred dollars", "mil ... dólares", or an amount word (hundred / thousand / mil / cientos).
+const DOLLAR_FIGURE_RE_ = /\$\s?\d|\b\d[\d,]*\s*(?:dollars?|d[oó]lares)\b|\b(?:dollars?|d[oó]lares|hundred|thousand|mil|cientos|ciento)\b/gi;
+function wordsNearFigure_(sn, wordRe, figRe, maxGap) {
+  const words = [], figs = [];
+  let m;
+  const w = new RegExp(wordRe.source, wordRe.flags.includes('g') ? wordRe.flags : wordRe.flags + 'g');
+  const f = new RegExp(figRe.source, figRe.flags.includes('g') ? figRe.flags : figRe.flags + 'g');
+  while ((m = w.exec(sn))) words.push({ s: m.index, e: m.index + m[0].length });
+  while ((m = f.exec(sn))) figs.push({ s: m.index, e: m.index + m[0].length });
+  for (const a of words) for (const b of figs) {
+    const gap = b.s >= a.e ? b.s - a.e : (a.s >= b.e ? a.s - b.e : 0);
+    if (gap <= maxGap) return true;
+  }
+  return false;
+}
+// Pass 9: a sentence is dropped only when it (a) contains the market figure or "market rent/rate/price"
+// wording, or (b) wraps "regularly / normally / for now ..." around a dollar figure (within ~40-60
+// characters), or (c) uses a promo phrase that is itself a price description ("special rate", "limited time"). Sentences without a dollar figure ("Rent is typically due on the first")
+// and valid price sentences with an unrelated "temporarily" are left alone.
 function stripMarketRentWording_(text, opts) {
   opts = opts || {};
   const t = String(text || '');
@@ -1030,7 +1053,9 @@ function stripMarketRentWording_(text, opts) {
   const bad = (sn) => {
     const n = normalizeForMatch_(sn);
     if (mre.test(sn) || mre.test(n) || MARKET_WORDING_RE_.test(n)) return true;
-    if (PRICE_CONTEXT_RE_.test(n) && (REGULAR_PRICE_RE_.test(n) || PROMO_FRAMING_RE_.test(n))) return true;
+    if (wordsNearFigure_(n, REGULAR_PRICE_RE_, DOLLAR_FIGURE_RE_, 40)) return true;
+    if (PROMO_STRONG_RE_.test(n)) return true;
+    if (wordsNearFigure_(n, PROMO_FRAMING_RE_, DOLLAR_FIGURE_RE_, 60)) return true;
     return false;
   };
   const parts = splitSentences_(t);
@@ -1345,6 +1370,15 @@ function buildSystemPrompt(property, content) {
         ' Then go back to the tour.';
     // Pass 8: the phone agent never speaks a market rent or a "regular" price.
     const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead.';
+    // Pass 9: with two live lease terms, a caller who repeats a listed price WITH its lease term is
+    // confirmed; a misheard (cents / decimal) or mismatched repeat is corrected to the right term.
+    const NUM2 = PUT['2br'] || {};
+    const sixOpt2 = promoUnits.indexOf('2br') !== -1 ? sixMonthOption_(NUM2) : null;
+    const spoken12 = NUM2.std12_utils_spoken || NUM2.utils_spoken || 'one thousand, five hundred dollars';
+    const fullFigures = 'Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", ' + (sixOpt2 ? 'twelve ninety five is "' + sixOpt2.spoken + '", ' : '') + 'seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting or confirming, continue naturally with the tour offer.';
+    const readbackRule = sixOpt2
+      ? 'if the caller repeats a price back, match it to the lease term THEY named and answer with the full amount in words. (a) Correct repeat with its term, for example "twelve ninety five for six months" or "fifteen hundred for a year": you may confirm it ("Yes, that is right") and say it in full: "' + sixOpt2.spoken + ' a month on a six-month lease" or "' + spoken12 + ' a month on a twelve-month lease", all utilities included. Do NOT correct a listed figure to the other term\'s price. (b) Misheard as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents): do NOT reply "that is right", "correct", "yes", or "exactly"; correct it plainly and immediately with the full amount for the term they named, for example "Just to be clear, it is ' + sixOpt2.spoken + ' a month on a six-month lease, all utilities included." (or the twelve-month figure if they were repeating that one). (c) A figure paired with the WRONG term (for example the six-month price said as the twelve-month price): give both options as listed. If they named no term, give both options as listed. ' + fullFigures
+      : 'if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is ' + spoken12 + ' a month, all utilities included." ' + fullFigures;
     const moveInCostRule = buildMoveInCostRule_(property.key, CC, usingFallbackContent);
     const priceFigures = 'Valid all-in MONTHLY figures on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
       ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
@@ -1413,12 +1447,13 @@ CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 
 CONDITIONS:
 - If a caller asks "what are the conditions", "is that a special", or "any catch", say: "Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour." Do not invent specific conditions or lease-length requirements.
+- PRECEDENCE for "is that a special?": if the caller asks whether the six-month price, the twelve-month price or either lease option is a special, a promotion or a deal, answer FIRST with "It is simply one of our two lease options" and THEN add the approval sentence above. This wins over the general conditions line. For any other special / catch / conditions question use the approval sentence alone.
 - Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
 
 PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - The AI agent does NOT quote specials, discounts or move-in offers. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, do NOT hint that one exists or might exist. Give the listed price and say: English: "${NO_SPECIAL_REPLY_EN}" Spanish: "${NO_SPECIAL_REPLY_ES}" NEVER state a dollar amount for any reduction, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, and any monthly rate lower than the ones in the pricing block. Move-in totals are quoted only as set out in the MOVE-IN COST rule.
-- If the caller pushes back on price ("that's higher than I expected", "is that the best you can do", "I was hoping for less"), asks about a budget gate ("I can only do up to X"), or hesitates at tour booking ("let me think about it"), DO NOT quote a discount or a lower number. There is no exception, on any unit type.
-- Instead, stay neutral and redirect to a tour with this exact framing. Never say or hint that the price can move, is flexible or negotiable, or depends on move-in timing or lease length:
+- If the caller pushes back on price ("that's higher than I expected", "is that the best you can do", "I was hoping for less"), asks about a budget gate ("I can only do up to X"), or hesitates at tour booking ("let me think about it"), DO NOT quote a discount or a lower number. There is no exception, on any unit type, except that you may repeat the two listed 2-bedroom lease options exactly as listed (never as a way to lower the price).
+- Instead, stay neutral and redirect to a tour with this exact framing. Never say or hint that the price can move, is flexible or negotiable, or depends on move-in timing or lease length (the two listed 2-bedroom lease options are fixed listed prices and may be repeated exactly as listed):
   - English: "${NO_SPECIAL_REPLY_EN} I would love to book a time for you to come see it. Is it okay if I text you the tour link?"
   - Spanish: "${NO_SPECIAL_REPLY_ES} Me encantaría agendar una visita para que usted vea el apartamento. ¿Está bien si le envío el enlace de la cita por texto?"
 - NEVER say "they can offer", "the discount is", "you can get nine ninety five", or any specific lower number. You never offer, hint at or discuss any pricing beyond the figures listed here.
@@ -1590,7 +1625,7 @@ PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
 - Write all prices as full words. ${priceFigures} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
 - Write all numbers as words when speaking about prices.
-- PRICE READBACK CORRECTION: if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is one thousand five hundred dollars a month, all utilities included." Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting, continue naturally with the tour offer.
+- PRICE READBACK CORRECTION: ${readbackRule}
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
 }
