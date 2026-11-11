@@ -4,7 +4,8 @@
   "description": "Mattgab Management Voice AI - ConversationRelay Server",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test check-lead-headers.js"
   },
   "dependencies": {
     "fastify": "^4.28.1",

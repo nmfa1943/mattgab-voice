@@ -12,6 +12,16 @@ const TWILIO_SID     = process.env.TWILIO_SID;
 const TWILIO_TOKEN   = process.env.TWILIO_TOKEN;
 const TWILIO_MSG_SID = process.env.TWILIO_MESSAGING_SERVICE_SID; // A2P 10DLC Messaging Service
 const PORT           = process.env.PORT || 8080;
+const LEAD_API_URL   = process.env.LEAD_API_URL || 'https://mattgabmanagement.com/lead-api.php';
+const AI_LEAD_KEY    = process.env.AI_LEAD_KEY; // X-API-Key on the lead post; never log
+
+// --- BEGIN leadApiHeaders (check-lead-headers.js evaluates the text between these markers) ---
+function leadApiHeaders(apiKey) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['X-API-Key'] = apiKey;
+  return headers;
+}
+// --- END leadApiHeaders ---
 
 const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 const twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
@@ -976,9 +986,9 @@ async function postLeadToDashboard(session) {
   if (ai_action_final) console.log(`Call action: ${ai_action_final}`);
 
   try {
-    const res = await fetch('https://mattgabmanagement.com/lead-api.php', {
+    const res = await fetch(LEAD_API_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: leadApiHeaders(AI_LEAD_KEY),
       body: JSON.stringify({
         source:   'twilio_voice',
         property: session.property?.key || '',
@@ -990,6 +1000,10 @@ async function postLeadToDashboard(session) {
         ai_action: ai_action_final,
       }),
     });
+    if (!res.ok) {
+      console.error('Lead POST HTTP status:', res.status);
+      return;
+    }
     const out = await res.json();
     if (out && out.success) {
       console.log(`Lead posted: id=${out.id} caller=${callerName || 'unnamed'} from=${session.from}`);
