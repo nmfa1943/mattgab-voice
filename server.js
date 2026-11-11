@@ -1204,6 +1204,7 @@ function ensureTwoBrPriceAnswered_(text, conversation, opts) {
     // drop approval-line sentences and sentences that carry only part of the 2BR price
     const kept = sents.filter(sn => {
       if (isApproval(sn)) return false;
+      if (q.market && hasCurrent(sn)) return false; // pass 11: parts.current is added below; no second copy
       const topicMoney = P10_DEPOSIT_RE_.test(sn) || /\b(pet|pets|mascota|mascotas)\b/i.test(sn);
       if (!topicMoney && (p10HasFigure_(sn, n12) || p10HasFigure_(sn, n6))) return false;
       return true;
@@ -1219,7 +1220,10 @@ function ensureTwoBrPriceAnswered_(text, conversation, opts) {
     if (ps.length > 1 && /[?¿]/.test(lastS)) { ps.splice(ps.length - 1, 0, add); out = ps.join(' '); }
     else out = out + ' ' + add;
   }
-  return out.replace(/\s+/g, ' ').trim();
+  // pass 11: never the same sentence twice in a row ("Those are our current prices. Those are our current prices.")
+  const seen = new Set();
+  out = splitSentences_(out.replace(/\s+/g, ' ').trim()).filter(sn => { const k = normalizeForMatch_(sn).replace(/[^a-z0-9]+/g, ' ').trim(); if (seen.has(k)) return false; seen.add(k); return true; }).join(' ');
+  return out;
 }
 
 // English number words -> digits (0-9999). Returns null when it cannot parse.
@@ -1274,6 +1278,122 @@ function fixSpanishNumerals_(text, opts) {
     return s;
   });
   return fixed.join(' ');
+}
+
+// ---------------------------------------------------------------------------
+// Pass 11 (2026-11-11): Spanish replies are SPOKEN with Spanish number words.
+// The 3:46 PM AZ staging call showed the Spanish text was correct ("$1,500 al mes con contrato de 12 meses",
+// "unidad 104") but the TTS voice read the digits in English. The text kept in the conversation history, the
+// log summary and the SMS/intent checks stays as written; only what goes to ConversationRelay is converted,
+// by speakableReply_ at every `type: 'text'` send. English sentences are never touched.
+// ---------------------------------------------------------------------------
+const P11_ES_SMALL_ = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve', 'diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'diecis\u00e9is', 'diecisiete', 'dieciocho', 'diecinueve', 'veinte', 'veintiuno', 'veintid\u00f3s', 'veintitr\u00e9s', 'veinticuatro', 'veinticinco', 'veintis\u00e9is', 'veintisiete', 'veintiocho', 'veintinueve'];
+const P11_ES_TENS_ = ['', '', '', 'treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
+const P11_ES_HUND_ = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+
+// Spanish cardinal for 0..999,999,999. apocope=true turns a final "uno" into "un" ("un d\u00f3lar", "veinti\u00fan meses").
+function p11EsCardinal_(n, apocope) {
+  n = Math.floor(Number(n));
+  if (!(n >= 0) || n > 999999999) return String(n);
+  if (n === 0) return 'cero';
+  const apoc = (s) => s.replace(/veintiuno$/, 'veinti\u00fan').replace(/\buno$/, 'un');
+  const below1000 = (x, ap) => {
+    let out;
+    if (x === 100) out = 'cien';
+    else {
+      const h = Math.floor(x / 100), r = x % 100;
+      const parts = [];
+      if (h) parts.push(P11_ES_HUND_[h]);
+      if (r) {
+        if (r < 30) parts.push(P11_ES_SMALL_[r]);
+        else {
+          const t = Math.floor(r / 10), u = r % 10;
+          parts.push(P11_ES_TENS_[t] + (u ? ' y ' + P11_ES_SMALL_[u] : ''));
+        }
+      }
+      out = parts.join(' ');
+    }
+    return ap ? apoc(out) : out;
+  };
+  const millions = Math.floor(n / 1000000), thousands = Math.floor((n % 1000000) / 1000), rest = n % 1000;
+  const out = [];
+  if (millions) out.push(millions === 1 ? 'un mill\u00f3n' : below1000(millions, true) + ' millones');
+  if (thousands) out.push(thousands === 1 ? 'mil' : below1000(thousands, true) + ' mil');
+  if (rest) out.push(below1000(rest, !!apocope));
+  return out.join(' ');
+}
+
+function p11EsDigitByDigit_(s) {
+  return String(s).replace(/\D/g, '').split('').map(d => P11_ES_SMALL_[Number(d)]).join(' ');
+}
+
+function p11EsHour_(h) { return h === 1 ? 'una' : p11EsCardinal_(h, false); }
+
+// Convert the digits in ONE Spanish sentence to Spanish words.
+function p11SpanishSentenceToWords_(sn) {
+  let s = String(sn);
+  // protect links / e-mail addresses (never spoken, never converted)
+  const keep = [];
+  s = s.replace(/(?:https?:\/\/|www\.)\S+|\S+@\S+\.\S+/gi, m => { keep.push(m); return '\u0001' + String(keep.length - 1).replace(/\d/g, d => 'abcdefghij'[d]) + '\u0002'; });
+  // times: "9 AM", "6 PM", "9:30 a.m."
+  s = s.replace(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])(?:\.\s?m\.|m\b)/gi, (m, hh, mm, ap, off, whole) => {
+    const h = Number(hh), min = mm ? Number(mm) : 0;
+    if (h < 1 || h > 12 || min > 59) return m;
+    const isPm = ap.toLowerCase() === 'p';
+    let when;
+    if (isPm) when = h === 12 ? 'del mediod\u00eda' : (h >= 7 ? 'de la noche' : 'de la tarde');
+    else when = h === 12 ? 'de la noche' : 'de la ma\u00f1ana';
+    return p11EsHour_(h) + (min ? ' y ' + p11EsCardinal_(min, false) : '') + ' ' + when + (/\.$/.test(m) && off + m.length >= whole.length ? '.' : '');
+  });
+  // money: "$1,500", "$1295", "$1,295.50", "$1,500/mes"
+  s = s.replace(/\$\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?:\s?\/\s?(?:mes|month))?/gi, (m, whole, cents) => {
+    const n = Number(whole.replace(/,/g, ''));
+    let out = p11EsCardinal_(n, true) + (n === 1 ? ' d\u00f3lar' : ' d\u00f3lares');
+    if (cents && Number(cents) > 0) { const c = Number(cents.length === 1 ? cents + '0' : cents); out += ' con ' + p11EsCardinal_(c, true) + (c === 1 ? ' centavo' : ' centavos'); }
+    if (/\/\s?(?:mes|month)/i.test(m)) out += ' al mes';
+    return out;
+  });
+  // phone numbers, digit by digit in groups: "602-997-2928", "(602) 997-2928", "+1 602 997 2928"
+  s = s.replace(/(?:\+?1[\s.-]?)?\(?\b(\d{3})\)?[\s.-]?(\d{3})[\s.-](\d{4})\b/g, (m, a, b, c) => p11EsDigitByDigit_(a) + ', ' + p11EsDigitByDigit_(b) + ', ' + p11EsDigitByDigit_(c));
+  // extension
+  s = s.replace(/\b(?:ext\.?|extensi[o\u00f3]n|extension)\s*#?\s*(\d{1,4})\b/gi, (m, d) => 'extensi\u00f3n ' + p11EsCardinal_(Number(d), false));
+  // lease length / durations: "12 meses", "6-month", "1 mes"
+  s = s.replace(/\b(\d{1,3})[\s-]*(meses|mes|months?)\b/gi, (m, d) => {
+    const n = Number(d);
+    return p11EsCardinal_(n, true) + (n === 1 ? ' mes' : ' meses');
+  });
+  s = s.replace(/#\s?(?=\d)/g, 'n\u00famero ');
+  // percentages
+  s = s.replace(/\b(\d+(?:\.\d+)?)\s?%/g, (m, d) => d + ' por ciento');
+  // everything else that is still a number
+  s = s.replace(/\d[\d,]*(?:\.\d+)?/g, (m, off, whole) => {
+    let out;
+    const clean = m.replace(/,$/, '');
+    const tail = m.length - clean.length ? ',' : '';
+    if (/^\d{5}$/.test(clean)) out = p11EsDigitByDigit_(clean);                  // zip codes
+    else if (/^\d+\.\d+$/.test(clean)) { const [ip, fp] = clean.split('.'); out = p11EsCardinal_(Number(ip), false) + ' punto ' + p11EsDigitByDigit_(fp); }
+    else if (/^\d{1,3}(?:,\d{3})+$/.test(clean) || /^\d{1,9}$/.test(clean)) out = p11EsCardinal_(Number(clean.replace(/,/g, '')), false);
+    else out = p11EsDigitByDigit_(clean);
+    const next = whole.charAt(off + m.length);
+    return out + tail + (/[A-Za-z\u00c0-\u00ff]/.test(next) && !tail ? ' ' : '');
+  });
+  s = s.replace(/\u0001([a-j]+)\u0002/g, (m, i) => keep[Number(i.replace(/[a-j]/g, c => 'abcdefghij'.indexOf(c)))]);
+  return s;
+}
+
+// What actually goes to the voice. Spanish sentences get number words; English sentences are untouched. The language is
+// picked per sentence from its own words, falling back to the whole reply, then to the session flag. Never throws.
+function speakableReply_(text, isSpanish) {
+  try {
+    const t = String(text == null ? '' : text);
+    if (!/\d/.test(t)) return t;
+    const whole = replyIsSpanish_(t, !!isSpanish);
+    // split on sentence ends, but not after an abbreviation that is followed by its number ("ext. 3", "a.m.")
+    const sents = t.split(/(?<=[.!?])(?<!\bext\.)(?<!\bapto?\.)(?<!\bnum\.)(?<!\ba\.m\.)(?<!\bp\.m\.)\s+/i).map(x => x.trim()).filter(Boolean);
+    return sents.map(sn => (/\d/.test(sn) && replyIsSpanish_(sn, whole)) ? p11SpanishSentenceToWords_(sn) : sn).join(' ');
+  } catch (e) {
+    return String(text == null ? '' : text);
+  }
 }
 
 const MAINT_EXT_PRESENT_RE_ = /(?:extension|extensi[oó]n|ext\.?)\s*(?:three|3|tres)\b/i;
@@ -2568,7 +2688,7 @@ fastify.register(async function(fastify) {
             if (factReply) {
               const spoken = neverEmptyReply(factReply, { isSpanish: session.isSpanish });
               console.log(`Factual intent intercepted: ${factualIntent} → ${spoken}`);
-              ws.send(JSON.stringify({ type: 'text', token: spoken, last: true }));
+              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(spoken, session.isSpanish), last: true }));
               session.conversation.push({ role: 'assistant', content: spoken });
               session.replyCommitted = true;
               break;
@@ -2612,8 +2732,10 @@ fastify.register(async function(fastify) {
                 isSpanish: session.isSpanish
               });
               fullResponse = spoken;
-              ws.send(JSON.stringify({ type: 'text', token: spoken, last: true }));
+              const toVoice = speakableReply_(spoken, session.isSpanish);
+              ws.send(JSON.stringify({ type: 'text', token: toVoice, last: true }));
               console.log(`AI said: ${spoken}`);
+              if (toVoice !== spoken) console.log(`AI voiced: ${toVoice}`);
 
               // Detect and send SMS links (tour checked FIRST)
               const intent = detectSmsIntent(fullResponse);
@@ -2672,7 +2794,7 @@ fastify.register(async function(fastify) {
               const fallback = session.isSpanish
                 ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
                 : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
-              ws.send(JSON.stringify({ type: 'text', token: fallback, last: true }));
+              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
             });
 
           } catch (err) {
@@ -2680,7 +2802,7 @@ fastify.register(async function(fastify) {
             const fallback = session.isSpanish
               ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
               : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
-            ws.send(JSON.stringify({ type: 'text', token: fallback, last: true }));
+            ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
           }
           break;
         }
