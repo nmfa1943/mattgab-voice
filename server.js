@@ -27,6 +27,26 @@ const anthropic = new Anthropic({ apiKey: ANTHROPIC_KEY });
 const twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
 
 // ============================================================
+// 2-BEDROOM LEAD-TERM SWITCH (pass 6, 2026-11-11). THE ONLY LINE TO FLIP.
+//   PASS 8 (ALTERNATE, both terms): the 2-bedroom is ALWAYS offered as TWO ongoing
+//   lease options, given together: $1,500 on a twelve-month lease and $1,295 on a
+//   six-month lease. This constant only picks which one is spoken FIRST.
+//   12 = "$1,500 a month on a twelve-month lease, or $1,295 a month on a six-month lease" (default)
+//   6  = "$1,295 a month on a six-month lease, or $1,500 a month on a twelve-month lease"
+// Affects every place the agent states the 2-bedroom price: renderUnitsBlock, the
+// prompt unit lines, the pricing rules, the move-in cost lines and the static
+// PROPERTIES units text. 1BR and 3BR are twelve-month only and never change.
+// Neither option is ever framed as a special, promo or limited-time price.
+// Changing it needs Jenea's written approval and a new md5.
+// ============================================================
+const TWO_BR_LEAD_TERM = 12;
+const TWO_BR_12_STATIC_ = 'one thousand, five hundred dollars a month on a twelve-month lease';
+const TWO_BR_6_STATIC_ = 'one thousand, two hundred ninety five dollars a month on a six-month lease';
+const TWO_BR_STATIC_LINE_ = TWO_BR_LEAD_TERM === 6
+  ? TWO_BR_6_STATIC_ + ', or ' + TWO_BR_12_STATIC_
+  : TWO_BR_12_STATIC_ + ', or ' + TWO_BR_6_STATIC_;
+
+// ============================================================
 // PROPERTY DATA — sourced from chat widget prompt (class-chat-widget.php)
 // ============================================================
 const PROPERTIES = {
@@ -43,11 +63,11 @@ const PROPERTIES = {
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: twelve ninety five a month, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
+2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
 1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included. AVAILABLE NOW.
 3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿En qué le puedo ayudar hoy?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -74,11 +94,11 @@ const PROPERTIES = {
     // not by confirming that a text arrived.
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: one thousand, two hundred ninety five dollars a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
+2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
 1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now.
 3 bedroom: one thousand, eight hundred dollars a month, all utilities included (electric, water, sewer, and trash) — NOT available right now.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿En qué le puedo ayudar hoy?"
   }
 };
 
@@ -241,7 +261,15 @@ const OPEN_QUESTION_EN = 'Can you tell me in a few words what you are calling ab
 const OPEN_QUESTION_ES = '¿Puede decirme en pocas palabras el motivo de su llamada?';
 const YANELIA_MESSAGE_EN = 'Happy to take a message for Yanelia. Can I get your name and what you would like me to tell her?';
 const YANELIA_MESSAGE_ES = 'Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?';
-const MAINT_MESSAGE_ES = 'Con gusto le tomo el mensaje para mantenimiento. ¿Me puede dar su nombre, su unidad y el problema? Confirmo que le devolveremos la llamada a este número.';
+// Pass 5 (2026-11-11): the Spanish maintenance script used to take the message
+// but never gave the Maintenance extension, and the per-turn hint told the model
+// to copy it, so Spanish non-emergency callers never heard extension 3.
+const MAINT_LINE_SPOKEN_EN = 'six oh two, nine nine seven, two nine two eight, extension three';
+const MAINT_LINE_SPOKEN_ES = 'seis cero dos, nueve nueve siete, dos nueve dos ocho, extensión tres';
+const MAINT_MESSAGE_ES = 'Con gusto le tomo el mensaje para mantenimiento. También puede llamar a la línea de mantenimiento al seis cero dos, nueve nueve siete, dos nueve dos ocho, extensión tres. ¿Me puede dar su nombre, su unidad y el problema? Confirmo que le devolveremos la llamada a este número.';
+const MAINT_EMERGENCY_ES = 'Por favor llame de inmediato a nuestra línea de mantenimiento al ' + MAINT_LINE_SPOKEN_ES + '. Las emergencias de mantenimiento van a esa línea, no conmigo.';
+const QUOTE_QUALIFIER_EN = 'subject to change depending on the application';
+const QUOTE_QUALIFIER_ES = 'sujeto a cambio según la solicitud';
 
 function callerAskedWhoYouAre(conversation) {
   const turns = (conversation || []).filter(m => m.role === 'user');
@@ -675,16 +703,378 @@ function buildTurnSystemHints(conversation, opts) {
   const recentEmergency = isTrueEmergency(recentUserTurns_(conversation, 3).join('\n'));
   if (isMaintenanceCall(conversation, { recentUserTurns: 3 }) && !recentEmergency) {
     const esHint = opts.isSpanish
-      ? ' If the call is in Spanish, use formal usted: "' + MAINT_MESSAGE_ES + '"'
+      ? ' If you reply in Spanish, use formal usted and say the extension as "extensión tres". Use this wording: "' + MAINT_MESSAGE_ES + '"'
       : '';
     suffix += '\n\nTHIS TURN ONLY: this appears to be a non-emergency maintenance call. Give extension three and take a maintenance message (name, unit, issue, confirm the callback number from this call). Use the emergency script whenever the caller describes danger to people or property, even if not listed. A broken refrigerator alone is not an emergency.' + esHint;
+  }
+  if (opts.isSpanish && recentEmergency && isMaintenanceCall(conversation, { recentUserTurns: 3 })) {
+    suffix += '\n\nTHIS TURN ONLY: this is a maintenance EMERGENCY. Give the Maintenance line immediately. If you reply in Spanish, use formal usted: "' + MAINT_EMERGENCY_ES + '"';
+  }
+  if (opts.isSpanish) {
+    suffix += '\n\nTHIS TURN ONLY: this call has been conducted in Spanish. Whenever you speak Spanish, speak ONLY formal usted: use usted, le, su, and verbs in the usted form (puede, quiere, desea, llame, escriba). Never use the tú forms tú, te, ti, tu, tus, contigo, puedes, quieres, tienes, llama, escribe.';
   }
   return suffix;
 }
 
+// ============================================================
+// Pass 5 helpers (2026-11-11): lead price, move-in cost quotes, guards
+// ============================================================
+function quoteQualifier_(content, isSpanish) {
+  const q = content && content.quote_qualifier;
+  if (isSpanish) return (q && q.es) || QUOTE_QUALIFIER_ES;
+  return (q && q.en) || QUOTE_QUALIFIER_EN;
+}
+
+// The price the agent leads with is ALWAYS the twelve-month price
+// (std12_utils_*), falling back to utils_* when a unit has no separate
+// twelve-month figure (1BR / 3BR are twelve-month only, so both are equal).
+// The store's price_note and lead_term fields are NOT read: Jenea decided
+// 2026-11-11 that the agent matches the office staff and leads with twelve months.
+// Pass 6: TWO_BR_LEAD_TERM (top of file) picks the lead term for any unit that
+// has a distinct six-month promo (the 2-bedroom). 1BR / 3BR never change.
+function leadsWithSix_(ut) {
+  return TWO_BR_LEAD_TERM === 6 && !!sixMonthOption_(ut);
+}
+function leadPriceSpoken_(ut, fb) {
+  if (!ut) return fb;
+  if (leadsWithSix_(ut)) return ut.utils_spoken;
+  return ut.std12_utils_spoken || ut.utils_spoken || fb;
+}
+// " on a twelve-month lease" / " on a six-month lease" after the lead price,
+// only for units that have two terms; '' for twelve-month-only units.
+function leadTermPhrase_(ut) {
+  if (!sixMonthOption_(ut)) return '';
+  return leadsWithSix_(ut) ? ' on a six-month lease' : ' on a twelve-month lease';
+}
+// The OTHER term's price (spoken right after the lead price, in the same sentence), or null.
+function secondTermOption_(ut) {
+  const six = sixMonthOption_(ut);
+  if (!six) return null;
+  if (leadsWithSix_(ut)) {
+    return { months: 12, word: 'twelve', spoken: ut.std12_utils_spoken };
+  }
+  return six;
+}
+
+// Pass 8: the unit's two ongoing lease options, always spoken together, lead term
+// first: "<A> a month on a twelve-month lease, or <B> a month on a six-month lease".
+// Single-term units (1BR / 3BR) return just "<price> a month".
+function twoTermPriceText_(ut, fb) {
+  const lead = leadPriceSpoken_(ut, fb);
+  const sec = secondTermOption_(ut);
+  if (!sec) return lead + ' a month';
+  return lead + ' a month' + leadTermPhrase_(ut) + ', or ' + sec.spoken + ' a month on a ' + sec.word + '-month lease';
+}
+// Spanish (usted) version of the same sentence body, figures as digits like the
+// move-in lines. '' when the store carries no numeric figures.
+function twoTermPriceTextEs_(ut) {
+  const six = sixMonthOption_(ut);
+  if (!six || typeof ut.utils_num !== 'number' || typeof ut.std12_utils_num !== 'number') return '';
+  const a12 = fmtMoney_(ut.std12_utils_num) + ' al mes con contrato de 12 meses';
+  const a6 = fmtMoney_(ut.utils_num) + ' al mes con contrato de ' + six.months + ' meses';
+  return leadsWithSix_(ut) ? a6 + ', o ' + a12 : a12 + ', o ' + a6;
+}
+
+// A distinct shorter-term ongoing option, or null. Pass 8: offered together with the
+// twelve-month price, never as a special. term6_note / term6_note_es are NEVER read.
+function sixMonthOption_(ut) {
+  const stm = ut && (ut.special_term_months === undefined ? 6 : ut.special_term_months);
+  if (!ut || !stm || !ut.utils_spoken || !ut.std12_utils_spoken) return null;
+  if (ut.utils_spoken === ut.std12_utils_spoken) return null;
+  if (typeof ut.utils_num === 'number' && typeof ut.std12_utils_num === 'number' && ut.utils_num >= ut.std12_utils_num) return null;
+  const words = { 3: 'three', 6: 'six', 9: 'nine' };
+  return {
+    months: stm,
+    word: words[stm] || String(stm),
+    spoken: ut.utils_spoken
+  };
+}
+
+function fmtMoney_(n) { return '$' + Number(n).toLocaleString('en-US'); }
+
+function costRange_(ut, base, isSpanish) {
+  const minN = ut[base + '_min_num'];
+  if (typeof minN !== 'number') return '';
+  const maxN = (typeof ut[base + '_max_num'] === 'number') ? ut[base + '_max_num'] : minN;
+  if (isSpanish) return minN === maxN ? fmtMoney_(minN) : fmtMoney_(minN) + ' a ' + fmtMoney_(maxN);
+  const minS = ut[base + '_min_spoken'] || fmtMoney_(minN);
+  const maxS = ut[base + '_max_spoken'] || fmtMoney_(maxN);
+  return minN === maxN ? minS : minS + ' to ' + maxS;
+}
+
+// Deposit / move-in sentences for each AVAILABLE unit type, built from the
+// store's deposit_* and movein_* fields. Every sentence ends with the store's
+// quote_qualifier. Returns [] when the store carries no figures.
+function moveInCostLines_(key, content) {
+  const p = content && content.properties && content.properties[key];
+  if (!p || !p.unit_types) return [];
+  const put = p.unit_types;
+  const avail = Array.isArray(p.available_types)
+    ? p.available_types
+    : Object.keys(put).filter(t => put[t] && put[t].quotable);
+  const label = { '1br': '1 bedroom', '2br': '2 bedroom', '3br': '3 bedroom' };
+  const qEn = quoteQualifier_(content, false), qEs = quoteQualifier_(content, true);
+  const out = [];
+  for (const t of ['1br', '2br', '3br']) {
+    const ut = put[t];
+    if (!ut || avail.indexOf(t) === -1) continue;
+    const depEn = costRange_(ut, 'deposit', false), depEs = costRange_(ut, 'deposit', true);
+    // Pass 6: when this unit leads with its six-month price (TWO_BR_LEAD_TERM = 6)
+    // and the store carries six-month move-in figures, those lead.
+    const leadSix = leadsWithSix_(ut) && typeof ut.movein_6_min_num === 'number';
+    const miEn = costRange_(ut, leadSix ? 'movein_6' : 'movein_12', false), miEs = costRange_(ut, leadSix ? 'movein_6' : 'movein_12', true);
+    if (!depEn && !miEn) continue;
+    const noAdmin = /no admin fee/i.test(ut.cost_line_en || '') || p.admin_fee_num === 0;
+    const en = [];
+    const es = [];
+    if (depEn) { en.push('the deposit is ' + depEn); es.push('el depósito es de ' + depEs); }
+    if (miEn) {
+      en.push('the move-in cost is ' + miEn + (leadSix ? ' on a six-month lease' : ' on a twelve-month lease'));
+      es.push('el costo de mudanza es de ' + miEs + (leadSix ? ' con contrato de ' + sixMonthOption_(ut).months + ' meses' : ' con contrato de 12 meses'));
+    }
+    let enText = en.join(', and ') + (noAdmin ? ', with no admin fee' : '') + ', ' + qEn + '.';
+    let esText = es.join(' y ') + (noAdmin ? ', sin cuota administrativa' : '') + ', ' + qEs + '.';
+    enText = enText.charAt(0).toUpperCase() + enText.slice(1);
+    esText = esText.charAt(0).toUpperCase() + esText.slice(1);
+    const six = sixMonthOption_(ut);
+    let sixEn = '', sixEs = '', twelveEn = '', twelveEs = '';
+    if (leadSix) {
+      // Second: the twelve-month move-in cost, only if asked.
+      const m12En = costRange_(ut, 'movein_12', false), m12Es = costRange_(ut, 'movein_12', true);
+      if (m12En) {
+        twelveEn = 'On a twelve-month lease the move-in cost is ' + m12En + ', ' + qEn + '.';
+        twelveEs = 'Con contrato de 12 meses el costo de mudanza es de ' + m12Es + ', ' + qEs + '.';
+      }
+    } else if (six && typeof ut.movein_6_min_num === 'number') {
+      const m6En = costRange_(ut, 'movein_6', false), m6Es = costRange_(ut, 'movein_6', true);
+      sixEn = 'On a ' + six.word + '-month lease the move-in cost is ' + m6En + ', ' + qEn + '.';
+      sixEs = 'Con contrato de ' + six.months + ' meses el costo de mudanza es de ' + m6Es + ', ' + qEs + '.';
+    }
+    out.push({ type: t, label: label[t], en: enText, es: esText, sixEn: sixEn, sixEs: sixEs, twelveEn: twelveEn, twelveEs: twelveEs, leadSix: leadSix });
+  }
+  return out;
+}
+
+const MOVE_IN_DEFLECT_EN = 'Your move-in cost depends on your application and lease terms, so our leasing team will give you the exact numbers at the tour. The monthly price already includes all your utilities. Want me to text you the tour link?';
+const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los términos del contrato, así que nuestro equipo le dará los números exactos en la visita. El precio mensual ya incluye todas sus utilidades. ¿Quiere que le envíe el enlace de la cita por texto?';
+
+// Pass 6: what the agent says when a caller asks about a special, discount or
+// move-in offer. Same sentence the CONDITIONS rule already uses; it never hints
+// that a reduction exists.
+const NO_SPECIAL_REPLY_EN = 'Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour.';
+const NO_SPECIAL_REPLY_ES = 'El precio depende de la aprobación de su solicitud, y nuestro equipo de arrendamiento le explicará todos los términos cuando venga a la visita.';
+
+// The MOVE-IN COST body of the system prompt. Quotes store figures when the
+// store has them and the content is live; otherwise (fallback mode, or no
+// figures in the store) it keeps the old "leasing team will give you the
+// numbers" deflection rather than guessing.
+function buildMoveInCostRule_(key, content, usingFallback) {
+  const head = '- "All utilities included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.\n';
+  const lines = usingFallback ? [] : moveInCostLines_(key, content);
+  if (!lines.length) {
+    return head +
+      '- If a caller asks "how much to move in", "what\'s the deposit", or "what does it cost upfront", do NOT quote a specific move-in total or deposit figure. Say:\n' +
+      '  - English: "' + MOVE_IN_DEFLECT_EN + '"\n' +
+      '  - Spanish: "' + MOVE_IN_DEFLECT_ES + '"';
+  }
+  const qEn = quoteQualifier_(content, false), qEs = quoteQualifier_(content, true);
+  let r = head;
+  r += '- If a caller asks "how much to move in", "what\'s the deposit", "what does it cost upfront", or the Spanish equivalent, QUOTE the figures listed below for the bedroom size they are asking about. If they did not name a size, use the unit you have been discussing, or the only unit that is AVAILABLE NOW. Do NOT say you cannot quote it, and do NOT send them to the leasing team instead of answering.\n';
+  r += '- EVERY time you say a deposit or move-in figure, include the qualifier "' + qEn + '" (in Spanish: "' + qEs + '"). Never state these figures as final, and do not drop the qualifier when you repeat a figure.\n';
+  if (lines.some(l => l.leadSix)) {
+    r += '- Give each unit\'s move-in cost on the lease term listed for it, first. For a unit listed on a six-month lease, give the six-month move-in cost first and give the twelve-month move-in cost listed below when the caller asks about a twelve-month lease or about the move-in cost on each lease option.\n';
+  } else {
+    r += '- Give the twelve-month move-in cost first. Give the six-month move-in cost listed below when the caller asks about a six-month lease or about the move-in cost on each lease option. Quote it exactly as listed, with the qualifier, and never present it as a special or a reduction.\n';
+  }
+  r += '- Use ONLY these figures. Do not invent any other fee. Do not quote a deposit or move-in cost for a unit that is NOT available. The pet fee and pet rent are separate and are in PET POLICY.\n';
+  for (const l of lines) {
+    r += '- ' + l.label + ' (English): "' + l.en + '"\n';
+    r += '- ' + l.label + ' (Spanish): "' + l.es + '"\n';
+    if (l.sixEn) {
+      r += '- ' + l.label + ' six-month lease, when asked (English): "' + l.sixEn + '"  (Spanish): "' + l.sixEs + '"\n';
+    }
+    if (l.twelveEn) {
+      r += '- ' + l.label + ' twelve-month lease, when asked (English): "' + l.twelveEn + '"  (Spanish): "' + l.twelveEs + '"\n';
+    }
+  }
+  r += '- After you quote the figures, pivot to the tour.';
+  return r;
+}
+
+// session.isSpanish latches true for the rest of a call and never reverts, so the
+// guards below pick the language from the reply text itself and only fall back to
+// the session flag when the text is inconclusive.
+function replyIsSpanish_(text, fallback) {
+  const t = normalizeForMatch_(text);
+  if (!t.trim()) return !!fallback;
+  const es = (t.match(/\b(el|la|los|las|de|del|que|para|con|su|sus|es|le|puede|desea|quiere|gracias|nombre|unidad|usted|costo|mudanza|deposito|solicitud|enlace|cita|tiene|mantenimiento|llamada|linea)\b/g) || []).length;
+  const en = (t.match(/\b(the|and|is|are|you|your|for|with|that|this|can|would|want|text|link|tour|please|name|unit|number|call|to|of)\b/g) || []).length;
+  if (es === en) return !!fallback;
+  return es > en;
+}
+
+const MONEY_FIGURE_RE_ = /\$\s?\d|\b\d{3,}\b|\bhundred\b|\bthousand\b|\bmil\b|\bcien(?:tos)?\b|\bquinientos\b|\bseiscientos\b/i;
+const MONEY_TOPIC_RE_ = /\b(deposit|move[- ]?in|dep[oó]sito|mudanza)\b/i;
+const QUALIFIER_PRESENT_RE_ = /subject to change|sujeto a cambio/i;
+
+// Guard: a reply that states a deposit / move-in figure always carries the
+// "subject to change depending on the application" qualifier, whatever the
+// model did. Inserted right after the last sentence that states a figure.
+function ensureQuoteQualifier_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || QUALIFIER_PRESENT_RE_.test(t)) return t;
+  const parts = splitSentences_(t);
+  let idx = -1;
+  for (let i = 0; i < parts.length; i++) {
+    // Pass 6 (Kiko N3): a phone number is not a money figure, and a pet deposit / pet fee
+    // is not a move-in quote, so neither gets the application qualifier.
+    const sn = parts[i].replace(/\b\d{3}[\s.-]\d{3}[\s.-]\d{4}\b/g, ' ');
+    if (/\b(pet|pets|mascota|mascotas)\b/i.test(sn)) continue;
+    if (MONEY_TOPIC_RE_.test(sn) && MONEY_FIGURE_RE_.test(sn)) idx = i;
+  }
+  if (idx === -1) return t;
+  const add = replyIsSpanish_(t, opts.isSpanish)
+    ? 'Eso está ' + (opts.quoteQualifierEs || QUOTE_QUALIFIER_ES) + '.'
+    : 'That is ' + (opts.quoteQualifierEn || QUOTE_QUALIFIER_EN) + '.';
+  parts.splice(idx + 1, 0, add);
+  return parts.join(' ');
+}
+
+// Pass 6 guard: no concession wording ever reaches the caller (Jenea, 2026-11-11).
+// Drops any sentence that mentions a concession (English or Spanish); if nothing
+// is left, speaks the standard no-special reply instead.
+const CONCESSION_RE_ = /\bconcessions?\b|\bconcesi(?:on|ones)\b/i;
+function stripConcessionWording_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || !CONCESSION_RE_.test(normalizeForMatch_(t))) return t;
+  const kept = splitSentences_(t).filter(sn => !CONCESSION_RE_.test(normalizeForMatch_(sn)));
+  const out = kept.join(' ').trim();
+  if (out) return out;
+  return replyIsSpanish_(t, opts.isSpanish) ? NO_SPECIAL_REPLY_ES : NO_SPECIAL_REPLY_EN;
+}
+
+// ---------------------------------------------------------------------------
+// Pass 8 guards (2026-11-11). Backstops that hold whatever the model or the store says.
+// ---------------------------------------------------------------------------
+// 1) "addendum of good faith" wording never reaches the caller (term6_note is not read
+//    either; this catches a model that produces the phrase on its own).
+const GOOD_FAITH_RE_ = /good[\s-]*faith|buena\s+fe|\baddend(?:um|a)\b|\banexos?\b/i;
+function stripGoodFaithWording_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || !GOOD_FAITH_RE_.test(normalizeForMatch_(t))) return t;
+  const kept = splitSentences_(t).filter(sn => !GOOD_FAITH_RE_.test(normalizeForMatch_(sn)));
+  const out = kept.join(' ').trim();
+  if (out) return out;
+  return replyIsSpanish_(t, opts.isSpanish) ? NO_SPECIAL_REPLY_ES : NO_SPECIAL_REPLY_EN;
+}
+
+// 2) The market rent (store market_num, $1,700) is NEVER spoken by the phone agent, and
+//    no price is ever described as "regularly" / "normally" something else, or as a
+//    special / promo / limited-time / "for now" price.
+function numberWordsEn_(n) {
+  const ones = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+  const tens = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+  if (n < 20) return ones[n];
+  if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+  return '';
+}
+// Spoken / written forms of a whole-dollar figure from 1,000 to 9,999.
+function moneyFormsRegex_(n) {
+  n = Math.round(Number(n));
+  if (!(n >= 1000 && n <= 9999)) return null;
+  const th = Math.floor(n / 1000), rest = n % 1000, hu = Math.floor(rest / 100), tail = rest % 100;
+  const forms = [String(n), String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')];
+  const reSp = (str) => str.replace(/[-,\s]+/g, '[-,\\s]*');
+  const words = [];
+  if (!tail && hu) words.push(numberWordsEn_(th * 10 + hu) + ' hundred'); // e.g. seventeen hundred
+  if (n >= 1100) {
+    const hh = Math.floor(n / 100);
+    if (hh < 100 && hh <= 99) words.push(numberWordsEn_(hh) + (tail ? ' ' + (tail < 10 ? 'oh ' : '') + numberWordsEn_(tail) : ' hundred')); // seventeen fifty
+  }
+  words.push(numberWordsEn_(th) + ' thousand' + (hu ? ' ' + numberWordsEn_(hu) + ' hundred' : '') + (tail ? ' ' + (hu ? 'and ' : '') + numberWordsEn_(tail) : ''));
+  const parts = forms.map(f => '\\$?\\s?' + f.replace(/,/g, ',?') + '(?!\\d)').concat(words.filter(w => w.indexOf('  ') === -1 && !/undefined/.test(w)).map(w => '\\b' + reSp(w) + '\\b'));
+  return parts.join('|');
+}
+function marketRentRegex_(content) {
+  const figs = new Set();
+  const skip = new Set();
+  const props = (content && content.properties) || {};
+  for (const k of Object.keys(props)) {
+    const put = (props[k] && props[k].unit_types) || {};
+    for (const t of Object.keys(put)) {
+      const u = put[t] || {};
+      // A figure that is a real listed rent is never treated as the market rent.
+      [u.std12_utils_num, u.utils_num].forEach(v => { if (typeof v === 'number') skip.add(v); });
+      if (typeof u.market_num === 'number') figs.add(u.market_num);
+    }
+  }
+  figs.add(1700); // the store's current market figure, kept hard even if the store drops it
+  const srcs = [];
+  for (const f of figs) { if (skip.has(f)) continue; const r = moneyFormsRegex_(f); if (r) srcs.push(r); }
+  return srcs.length ? new RegExp('(?:' + srcs.join('|') + ')', 'i') : /$^/;
+}
+const MARKET_WORDING_RE_ = /\bmarket[\s-]*(?:rent|rate|price|value)s?\b|\bmarket_num\b|\brenta\s+de\s+mercado\b|\bprecio\s+de\s+mercado\b|\btachad[oa]\b|\bcrossed[\s-]*out\b|\bstruck[\s-]*through\b/i;
+const REGULAR_PRICE_RE_ = /\b(?:regularly|normally|usually|typically|ordinarily|originally|regular\s+(?:price|rent|rate)|normal\s+(?:price|rent|rate)|usual\s+(?:price|rent|rate)|regularmente|normalmente|usualmente|precio\s+(?:regular|normal))\b/i;
+const PROMO_FRAMING_RE_ = /\b(?:limited[\s-]*time|for\s+now|promo(?:tion|tional)?s?|special\s+(?:price|rate|offer|pricing|deal)|temporar(?:y|ily)|seasonal|introductory|oferta\s+especial|por\s+tiempo\s+limitado|por\s+ahora|promoci[oó]n)\b/i;
+const PRICE_CONTEXT_RE_ = /\$\s?\d|\b\d{3,}\b|\bhundred\b|\bthousand\b|\bmil\b|\b(?:rent|price|rate|lease|month|renta|precio|contrato|mes)\b/i;
+function stripMarketRentWording_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim()) return t;
+  let content = opts.content;
+  if (!content && typeof CONTENT_CACHE !== 'undefined') content = CONTENT_CACHE;
+  const mre = marketRentRegex_(content);
+  const bad = (sn) => {
+    const n = normalizeForMatch_(sn);
+    if (mre.test(sn) || mre.test(n) || MARKET_WORDING_RE_.test(n)) return true;
+    if (PRICE_CONTEXT_RE_.test(n) && (REGULAR_PRICE_RE_.test(n) || PROMO_FRAMING_RE_.test(n))) return true;
+    return false;
+  };
+  const parts = splitSentences_(t);
+  if (!parts.some(bad)) return t;
+  const kept = parts.filter(sn => !bad(sn));
+  const out = kept.join(' ').trim();
+  if (out) return out;
+  return replyIsSpanish_(t, opts.isSpanish) ? NO_SPECIAL_REPLY_ES : NO_SPECIAL_REPLY_EN;
+}
+
+const MAINT_EXT_PRESENT_RE_ = /(?:extension|extensi[oó]n|ext\.?)\s*(?:three|3|tres)\b/i;
+
+// Guard: a maintenance call (emergency or not) always hears extension 3 once.
+// Skipped when an assistant turn in the last few turns already gave it.
+function ensureMaintenanceExtension_(text, conversation, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || MAINT_EXT_PRESENT_RE_.test(t)) return t;
+  // Pass 6 (Kiko N4): a reply that is quoting deposit / move-in money is not a maintenance reply.
+  if (MONEY_TOPIC_RE_.test(t) && MONEY_FIGURE_RE_.test(t)) return t;
+  const recentAssistant = (conversation || []).filter(m => m.role === 'assistant').slice(-4);
+  if (recentAssistant.some(m => MAINT_EXT_PRESENT_RE_.test(m.content || ''))) return t;
+  // Only when the caller's own words describe a maintenance problem.
+  if (!isMaintenanceCall(conversation, { recentUserTurns: 3 })) return t;
+  const add = replyIsSpanish_(t, opts.isSpanish)
+    ? 'También puede llamar a la línea de mantenimiento al ' + MAINT_LINE_SPOKEN_ES + '.'
+    : 'You can also reach the Maintenance line at ' + MAINT_LINE_SPOKEN_EN + '.';
+  const parts = splitSentences_(t);
+  const last = parts[parts.length - 1] || '';
+  if (parts.length > 1 && /[?¿]/.test(last)) parts.splice(parts.length - 1, 0, add);
+  else parts.push(add);
+  return parts.join(' ');
+}
+
 function commitAssistantReply(session, rawText, opts) {
   opts = opts || {};
-  const spoken = neverEmptyReply(polishAssistantReply(rawText, opts), opts);
+  let spoken = neverEmptyReply(polishAssistantReply(rawText, opts), opts);
+  // Use the store's qualifier wording when the content cache carries it.
+  const storeQ = (typeof CONTENT_CACHE !== 'undefined' && CONTENT_CACHE && CONTENT_CACHE.quote_qualifier) || {};
+  spoken = stripConcessionWording_(spoken, opts);
+  spoken = stripGoodFaithWording_(spoken, opts);
+  spoken = stripMarketRentWording_(spoken, opts);
+  spoken = ensureQuoteQualifier_(spoken, Object.assign({ quoteQualifierEn: storeQ.en, quoteQualifierEs: storeQ.es }, opts));
+  spoken = ensureMaintenanceExtension_(spoken, session.conversation, opts);
   session.conversation = session.conversation || [];
   session.conversation.push({ role: 'assistant', content: spoken });
   session.replyCommitted = true;
@@ -807,8 +1197,10 @@ function renderUnitsBlock(key, content) {
   const p = content.properties[key];
   // All-in spoken price per unit, read from content; fall back to the historical
   // literal if the store lacks it (behavior-preserving).
-  const sp = (u, fb) => (p.unit_types[u] && p.unit_types[u].utils_spoken) ? p.unit_types[u].utils_spoken : fb;
-  const oneBR = sp('1br', 'one thousand three hundred dollars'), twoBR = sp('2br', 'twelve ninety five'), threeBR = sp('3br', 'eighteen hundred');
+  // Pass 5/6: the lead price follows TWO_BR_LEAD_TERM (default 12: the TWELVE-MONTH
+  // price, std12_utils_*). Pass 8: a unit with two lease terms lists BOTH in the same line.
+  const sp = (u, fb) => leadPriceSpoken_(p.unit_types[u], fb);
+  const oneBR = sp('1br', 'one thousand three hundred dollars'), twoBR = sp('2br', 'one thousand, five hundred dollars'), threeBR = sp('3br', 'eighteen hundred');
   // AVAILABILITY IS NOW DRIVEN BY THE STORE (2026-09-02). Both return statements
   // here used to hardcode "AVAILABLE NOW" per unit type, which is why marking a
   // type unavailable in content.json changed its price everywhere and its
@@ -823,7 +1215,7 @@ function renderUnitsBlock(key, content) {
   const sq = (t) => (p.unit_types[t] && p.unit_types[t].sqft_line) ? ' ' + p.unit_types[t].sqft_line + '.' : '';
   return '\n' + order.filter(t => p.unit_types[t]).map(t =>
     avail.indexOf(t) !== -1
-      ? label[t] + ': ' + price[t] + ' a month, all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
+      ? label[t] + ': ' + twoTermPriceText_(p.unit_types[t], price[t]) + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
       : label[t] + ': ' + price[t] + ' a month, all utilities included \u2014 NOT available right now.'
   ).join('\n');
 }
@@ -891,9 +1283,10 @@ function buildSystemPrompt(property, content) {
   const NM1 = CC.properties.nmfa.unit_types['1br'] || {};
   const NM3 = CC.properties.nmfa.unit_types['3br'] || {};
   const WS1 = CC.properties.windsong.unit_types['1br'] || {};
-  const spk = (u, fb) => (u && u.utils_spoken) ? u.utils_spoken : fb;
-  const nm1p = spk(NM1, 'one thousand three hundred dollars'), nm2p = spk(NM2, 'twelve ninety five'), nm3p = spk(NM3, 'eighteen hundred');
-  const ws1p = spk(WS1, 'one thousand three hundred dollars'), ws2p = spk(WS2, 'twelve ninety five'), ws3p = spk(WS3, 'eighteen hundred');
+  // Pass 5/6: the price the agent leads with follows TWO_BR_LEAD_TERM (default 12 = twelve-month).
+  const spk = (u, fb) => leadPriceSpoken_(u, fb);
+  const nm1p = spk(NM1, 'one thousand three hundred dollars'), nm2p = spk(NM2, 'one thousand, five hundred dollars'), nm3p = spk(NM3, 'eighteen hundred');
+  const ws1p = spk(WS1, 'one thousand three hundred dollars'), ws2p = spk(WS2, 'one thousand, five hundred dollars'), ws3p = spk(WS3, 'eighteen hundred');
   const OBS  = CC.obsolete_figures || [];
   const OBSX = CC.obsolete_figures_pronunciation_extra || [];
   // "a", "b", or "c"  — matches the exact prose format used in the prompt.
@@ -925,7 +1318,7 @@ function buildSystemPrompt(property, content) {
             : 'Availability is limited right now - check with the office before offering a tour.');
     const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
       AVAIL.indexOf(t) !== -1
-        ? '- ' + UNIT_LABEL[t] + ': "' + UNIT_PRICE[t] + ' a month, all utilities included." AVAILABLE NOW - offer it for a tour.'
+        ? '- ' + UNIT_LABEL[t] + ': "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included." AVAILABLE NOW - offer it for a tour.'
         : '- ' + UNIT_LABEL[t] + ': say "' + UNIT_PRICE[t] + ' a month" ONLY as "our ' + UNIT_LABEL[t] + ', which is not available right now." Never offer it for a tour or application.'
     ).join('\n');
     const offerableList = AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now';
@@ -940,11 +1333,27 @@ function buildSystemPrompt(property, content) {
     const fallbackAvailabilityRule = usingFallbackContent
       ? '\nFALLBACK MODE — THE LIVE PRICE LIST COULD NOT BE LOADED FOR THIS CALL:\nDo not state unit availability as a fact. If the caller asks whether a unit is available, say: "Let me have the office confirm current availability for you." You may mention the last known prices below as figures the office will confirm, and you may offer to have the office call them back.\n'
       : '';
+    // Pass 8: two-term units (2BR). BOTH lease options are always given together, lead
+    // term (TWO_BR_LEAD_TERM) first. They are ongoing options, never a special.
+    const promoUnits = AVAIL.filter(t => UNIT_LABEL[t] && sixMonthOption_(PUT[t]));
+    const ES_UNIT = { '1br': 'una recámara', '2br': 'dos recámaras', '3br': 'tres recámaras' };
+    const sixMonthRule = !promoUnits.length ? ''
+      : '\n- TWO LEASE OPTIONS, ALWAYS TOGETHER: for the unit(s) listed above with two lease lengths, every time you give the price, state BOTH lease options in the same sentence, in the order listed above, each with its lease length: ' +
+        promoUnits.map(t => UNIT_LABEL[t] + ' "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included"').join('; ') +
+        '. These are our two ongoing lease options, said plainly with no extra framing. Do not recommend one over the other and never say either can change. If the caller asks whether the six-month price is a special or a promotion, say it is simply one of our two lease options, then go back to the tour. In Spanish always use usted: ' +
+        promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El apartamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con todos los servicios incluidos."' : ''; }).filter(Boolean).join(' ') +
+        ' Then go back to the tour.';
+    // Pass 8: the phone agent never speaks a market rent or a "regular" price.
+    const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead.';
+    const moveInCostRule = buildMoveInCostRule_(property.key, CC, usingFallbackContent);
     const priceFigures = 'Valid all-in MONTHLY figures on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
       ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
         '"' + UNIT_PRICE[t] + '" (' + t.charAt(0) + '-bedroom, all utilities included \u2014 ' +
         (AVAIL.indexOf(t) !== -1 ? 'AVAILABLE now)' : 'NOT available; say only as "our ' + WORD[t] + '-bedroom, not available right now")')
-      ).join(', ') + '.';
+      ).join(', ') + '.' +
+      (promoUnits.length
+        ? ' Two-term units, BOTH figures are valid and are always given together: ' + promoUnits.map(t => t.charAt(0) + '-bedroom "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + '"').join(', ') + '.'
+        : '');
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 ${fallbackAvailabilityRule}
 GREETING AND DELIVERY RULES — CRITICAL:
@@ -963,7 +1372,7 @@ Describe the PROPERTY. Never describe the kind of person who should live in it. 
 - If a caller asks whether the community is good for children, for seniors, or for any other group, do NOT give a verdict on the group. Say everyone is welcome to apply, then give the concrete fact they are really asking about - the bedroom counts, the square footage, the quiet hours, what is nearby - and let them decide.
 - If a caller mentions a disability, a service or assistance animal, or asks for an accommodation, do NOT assess it, do NOT ask what the condition is, and do NOT promise anything. Say:
   - English: "Everyone is welcome to apply here. Our leasing team handles accommodation requests, and they will go through that with you directly."
-  - Spanish: "Todos son bienvenidos a aplicar aqui. Nuestro equipo de arrendamiento se encarga de las solicitudes de adaptacion, y lo revisaran contigo directamente."
+  - Spanish: "Todos son bienvenidos a aplicar aquí. Nuestro equipo de arrendamiento se encarga de las solicitudes de adaptación, y lo revisarán con usted directamente."
 - Quote the same prices, the same availability, the same unit types and the same process to every caller who asks, no matter what they have told you about themselves.
 
 ============================================================
@@ -973,9 +1382,9 @@ ALL UTILITIES INCLUDED IN RENT.
 ${property.units}
 
 PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
-- Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. NEVER present two prices or a choice. NEVER say the word "bill". NEVER say "most people choose".
+- Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. Apart from the two lease options of a unit listed above, NEVER present two prices or a choice up front. NEVER say the word "bill". NEVER say "most people choose".
 - THIS LINE IS ${property.key === 'nmfa' ? 'NMFA' : 'WINDSONG'}. ${availSentence}
-${unitLines}
+${unitLines}${sixMonthRule}${marketRentRule}
 - After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
@@ -983,10 +1392,7 @@ ${unitLines}
 - If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer or price a unit that is not AVAILABLE NOW.
 
 MOVE-IN COST:
-- "All utilities included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.
-- If a caller asks "how much to move in", "what's the deposit", or "what does it cost upfront", do NOT quote a specific move-in total or deposit figure. Say:
-  - English: "Your move-in cost depends on your application and lease terms, so our leasing team will give you the exact numbers at the tour. The monthly price already includes all your utilities. Want me to text you the tour link?"
-  - Spanish: "El costo de mudanza depende de tu solicitud y los términos del contrato, así que nuestro equipo te dará los números exactos en la visita. El precio mensual ya incluye todas tus utilidades. ¿Quieres que te envíe el enlace de la cita por texto?"
+${moveInCostRule}
 
 REPAIRS — WHO PAYS (ASKED BY A PROSPECT, NOT ONLY A RESIDENT):
 - A prospect asking "what if something breaks", "who pays for repairs", or "are repairs included" gets the SAME answer a resident gets. This is not a maintenance call, but it is the same promise, and it is just as binding on us.
@@ -1007,15 +1413,15 @@ CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 
 CONDITIONS:
 - If a caller asks "what are the conditions", "is that a special", or "any catch", say: "Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour." Do not invent specific conditions or lease-length requirements.
-- Lead with the all-in price. Do NOT lead with "special" or lease-term framing.
+- Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
 
 PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
-- The leasing team has access to additional concessions that the AI agent does NOT quote. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, say "qualified applicants may be eligible for move-in concessions, and our leasing team can review your situation and go over the exact terms." NEVER state a concession dollar amount, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, move-in totals, and any monthly rate lower than the ones in the pricing block.
+- The AI agent does NOT quote specials, discounts or move-in offers. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, do NOT hint that one exists or might exist. Give the listed price and say: English: "${NO_SPECIAL_REPLY_EN}" Spanish: "${NO_SPECIAL_REPLY_ES}" NEVER state a dollar amount for any reduction, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, and any monthly rate lower than the ones in the pricing block. Move-in totals are quoted only as set out in the MOVE-IN COST rule.
 - If the caller pushes back on price ("that's higher than I expected", "is that the best you can do", "I was hoping for less"), asks about a budget gate ("I can only do up to X"), or hesitates at tour booking ("let me think about it"), DO NOT quote a discount or a lower number. There is no exception, on any unit type.
-- Instead, redirect to a tour with this exact framing:
-  - English: "Our leasing team has flexibility on pricing based on your move-in timing and lease length. I would love to book a time for you to come see it and talk with them directly. Is it okay if I text you the tour link?"
-  - Spanish: "Nuestro equipo de arrendamiento tiene flexibilidad con los precios dependiendo de cuándo te mudas y la duración del contrato. Me encantaría agendar una visita para que veas el apartamento y hables con ellos directamente. ¿Está bien si te envío el enlace de la cita por texto?"
-- NEVER say "they can offer", "the discount is", "you can get nine ninety five", or any specific lower number. Concessions are decided by the human agent during the tour. This rule exists to protect margin on every web channel and to give the human team a real closing tool.
+- Instead, stay neutral and redirect to a tour with this exact framing. Never say or hint that the price can move, is flexible or negotiable, or depends on move-in timing or lease length:
+  - English: "${NO_SPECIAL_REPLY_EN} I would love to book a time for you to come see it. Is it okay if I text you the tour link?"
+  - Spanish: "${NO_SPECIAL_REPLY_ES} Me encantaría agendar una visita para que usted vea el apartamento. ¿Está bien si le envío el enlace de la cita por texto?"
+- NEVER say "they can offer", "the discount is", "you can get nine ninety five", or any specific lower number. You never offer, hint at or discuss any pricing beyond the figures listed here.
 
 PET POLICY:
 STEP 1 - DECIDE WHAT KIND OF ANIMAL THIS IS. Do this BEFORE you say any number. Do not read the
@@ -1031,7 +1437,7 @@ ORDINARY PETS section until you have decided.
 
 STEP 2 - SERVICE ANIMAL ANSWER (use this and nothing else):
   - English: "Service animals and assistance animals are welcome with documentation, and they are not charged any pet fee or pet rent. Our leasing team handles that paperwork with you directly."
-  - Spanish: "Los animales de servicio y de apoyo emocional son bienvenidos con documentación, y no pagan ninguna cuota ni renta de mascota. Nuestro equipo de arrendamiento se encarga de ese papeleo contigo directamente."
+  - Spanish: "Los animales de servicio y de apoyo emocional son bienvenidos con documentación, y no pagan ninguna cuota ni renta de mascota. Nuestro equipo de arrendamiento se encarga de ese papeleo con usted directamente."
 
 STEP 3 - ORDINARY PETS ONLY. Everything below applies ONLY after STEP 1 established this is an
 ordinary pet. If it is a service or assistance animal, none of it applies.
@@ -1047,7 +1453,7 @@ English and in Spanish, because it read the list from the top. The decision has 
 SECTION 8 AND HOME INC:
 - Both NMFA and Windsong accept Section 8 vouchers and HOME Inc.
 - If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
-- Do not immediately pitch units or the special after a hardship mention. Keep the conversation open.
+- Do not immediately pitch units or prices after a hardship mention. Keep the conversation open.
 - A caller saying they are a single parent is NOT a hardship signal and must not change your reply. Be warm, say nothing about their family, and answer what they asked. If they separately say money is tight, the financial phrases above already cover it.
 
 ============================================================
@@ -1088,7 +1494,7 @@ LEASING FLOW:
 
 CLOSING — only AFTER you have asked "Is there anything else I can help you with?" and the caller has nothing more, say EXACTLY this template, no variants (do NOT jump to it straight from sending a link):
 - English: "Looking forward to meeting you, [Name]. Reach out anytime by call or text." If the caller never gave a name, drop the name token but keep the rest.
-- Spanish: "Estoy emocionado de conocerte, [Nombre]. Llama o escribe cuando quieras." If the caller never gave a name, drop the name token but keep the rest.
+- Spanish: "Estoy emocionado de conocerle, [Nombre]. Llame o escriba cuando quiera." If the caller never gave a name, drop the name token but keep the rest.
 - DO NOT say "Take care", "Thanks for choosing Mattgab Management", "Que tengas un excelente día", or "Feel free to call or text this number anytime". Those phrasings are deprecated as of May 21, 2026 and must not appear in a closing turn.
 - Say the closing template ONCE, then STOP. Do not repeat it and do not stack extra goodbyes. If the caller says "bye" or "thank you" after your closing, reply with at most a single short "Bye!" (or "¡Adiós!") and end there. NEVER send multiple back-to-back farewell messages.
 
@@ -1105,9 +1511,9 @@ MAINTENANCE
 ============================================================
 Guide first, escalate only if unresolved.
 
-EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat, or similar immediate danger): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me." Use this emergency script ONLY for those true emergencies.
+EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat, or similar immediate danger): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me." Use this emergency script ONLY for those true emergencies. In Spanish, use formal usted: "${MAINT_EMERGENCY_ES}"
 A broken refrigerator, a fridge that is not cooling, or a similar appliance problem is NOT an emergency. Do not use the emergency script for it.
-NON-EMERGENCY MAINTENANCE (including a broken refrigerator): on the SAME turn, do both of these: (1) give the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, read digit by digit, and (2) take a maintenance message for the lead row: first name if you do not already have it, the unit if they have one, the issue (repeat back what they said if they already told you), and confirm that the number they are calling from is the best callback number — that number is already on the lead from caller ID. Then say you will pass the message to the maintenance team. Never say you cannot take a message. Flag this internally as a maintenance call, not a leasing lead. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para mantenimiento. ¿Me puede dar su nombre, su unidad y el problema? Confirmo que le devolveremos la llamada a este número." Use the emergency script whenever the caller describes danger to people or property, even if not listed.
+NON-EMERGENCY MAINTENANCE (including a broken refrigerator): on the SAME turn, do both of these: (1) give the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, read digit by digit, and (2) take a maintenance message for the lead row: first name if you do not already have it, the unit if they have one, the issue (repeat back what they said if they already told you), and confirm that the number they are calling from is the best callback number — that number is already on the lead from caller ID. Then say you will pass the message to the maintenance team. Never say you cannot take a message. Flag this internally as a maintenance call, not a leasing lead. If the call is in Spanish, use formal usted and give the extension in the same turn ("extensión tres"): "${MAINT_MESSAGE_ES}" Use the emergency script whenever the caller describes danger to people or property, even if not listed.
 SMOKE DETECTOR (non-emergency): Replace 9-volt battery. If it continues, give extension three and take the maintenance message, then offer the portal.
 OUTLET: Press GFCI Reset button (bathroom or kitchen). If it continues, give extension three and take the maintenance message, then offer the portal.
 GARBAGE DISPOSAL: Press red reset underneath. If it continues, give extension three and take the maintenance message, then offer the portal.
@@ -1137,7 +1543,7 @@ TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the 
 Then confirm: "Thank you, [Name]. I'll pass this to the team and they'll call you back during office hours." Then ask "Is there anything else I can help you with?"
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
-Spanish: "Claro. Puedes comunicarte con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo te devuelva la llamada a este número. ¿Quieres dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puedes dar tu nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverte la llamada?"), and confirm: "Gracias, [Nombre]. Le paso tu mensaje al equipo y te devolverán la llamada en horario de oficina."
+Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
 
 ============================================================
 LANGUAGE RULES
@@ -1148,6 +1554,7 @@ LANGUAGE RULES
 - Do NOT switch on names like "Jenea", "Jose", "Maria", or similar.
 - If you are unsure whether the caller is speaking Spanish, ask in English first: "Would you prefer to continue in Spanish?"
 - STAY CONSISTENT: once a call is being conducted in Spanish (the caller opened in Spanish or switched to Spanish), conduct the ENTIRE rest of the call in Spanish. Do NOT drift back to English on your own; only return to English if the CALLER clearly switches back to English. Never mix English and Spanish within your own reply.
+- SPANISH REGISTER: in Spanish, ALWAYS use the formal "usted" with every caller, on every turn, with no exceptions. Use usted, le, su, and the usted form of verbs (puede, quiere, desea, llame, escriba, envíe). NEVER use the informal tú forms: tú, te, ti, tu, tus, contigo, puedes, quieres, tienes, llama, escribe, dime. Do not switch to tú even if the caller uses tú with you.
 - MID-CALL SWITCHING: If the caller switches language mid-conversation (English to Spanish or Spanish to English), switch with them on your very next response and stay in the new language for the rest of the call. Watch for full Spanish phrases like "¿en qué parte está el apartamento?", "los bills incluyen", "solo for mí" — those signal a switch. Single Spanish words still do not switch.
 
 ============================================================
@@ -1177,13 +1584,13 @@ RULES
 - STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are ${nmfaHoursCanon}." Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing, so when the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA AND STEPHANY NO LONGER WORK HERE: if a caller asks for either one, do not route to them and do not say why they left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," or for Stephany "Stephany is no longer with us. Viola handles leasing now and can help you with anything Stephany would have," then give Viola's NMFA number and hours (extension one, as above). Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are ${windsongHoursCanon}." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
 - NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; give the departure message from the mapping above, then offer Viola): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A, Hosie. For Yanelia (still with NMFA; take a message, do not invent an extension): Yaneli, Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
-- Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Estoy emocionado de conocerte, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
+- Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Estoy emocionado de conocerle, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
 - Write all prices as full words. ${priceFigures} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
 - Write all numbers as words when speaking about prices.
-- PRICE READBACK CORRECTION: if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is one thousand two hundred ninety five dollars a month, all utilities included." Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting, continue naturally with the tour offer.
+- PRICE READBACK CORRECTION: if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is one thousand five hundred dollars a month, all utilities included." Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting, continue naturally with the tour offer.
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
 - In English responses, avoid Spanish words entirely even for property terms.`
 }
@@ -1653,7 +2060,7 @@ function isConsentAffirmative(text) {
 function offersToText(text) {
   if (!text) return false;
   const flat = text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const offersSend = /\b(send|sending|text you|envio|envie|enviar|enviarte|enviando|enviandote|mandar|mandarte|mando)\b/.test(flat);
+  const offersSend = /\b(send|sending|text you|envio|envie|enviar|enviarte|enviarle|enviando|enviandote|enviandole|mandar|mandarte|mandarle|mando)\b/.test(flat);
   const theThing   = /\b(link|enlace|text|texto|mensaje|sms)\b/.test(flat);
   return offersSend && theThing;
 }
@@ -1683,7 +2090,7 @@ function detectSmsIntent(text) {
   // are. The real offer lines say "te envio", "te envie" or "enviarte"; only the
   // send line says "estoy enviandote". Matching the offer would send links before
   // consent - the same bug this rule was written to stop.
-  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now|estoy enviando|estoy enviandote|enviandote el enlace|enviando el enlace)\b/.test(flat);
+  const isSendingNow = /\b(i am sending|i'?m sending|sending you the|sending it now|sending now|estoy enviando|estoy enviandote|estoy enviandole|enviandote el enlace|enviandole el enlace|enviando el enlace)\b/.test(flat);
   if (!isSendingNow) return null;
   // TOUR is checked FIRST so "I'm sending you the tour link and application link" maps to tour
   // Spanish type words taken from real transcripts: "enlace de la cita" and
@@ -1753,7 +2160,7 @@ function buildFactualReply(intent, property, isSpanish) {
   if (intent === 'hours') {
     if (isSpanish) {
       const esHours = property.hours_es || property.hours;
-      return `El horario de la oficina es ${esHours}. ¿Quieres que te envíe el enlace para reservar un recorrido?`;
+      return `El horario de la oficina es ${esHours}. ¿Desea que le envíe el enlace para reservar un recorrido?`;
     }
     return `Our office hours are ${property.hours}. Would you like me to send you the tour link?`;
   }
