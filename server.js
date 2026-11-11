@@ -74,9 +74,9 @@ const PROPERTIES = {
     // not by confirming that a text arrived.
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
-2 bedroom: twelve ninety five a month, all utilities included — NOT available right now.
-1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now, all leased.`,
+2 bedroom: one thousand, two hundred ninety five dollars a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
+1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now.
+3 bedroom: one thousand, eight hundred dollars a month, all utilities included (electric, water, sewer, and trash) — NOT available right now.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿Cómo puedo ayudarte hoy?"
   }
@@ -112,41 +112,48 @@ const DEFAULT_CONTENT = {
     nmfa: {
       hours_en: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
       hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
-      units_note: 'NOTE: North Mountain Foothills has 2-bedrooms available right now. 1-bedrooms are temporarily unavailable, so do not quote a 1-bedroom price or move-in; if asked, say our 1-bedrooms are temporarily unavailable and we have 2-bedrooms ready now. NMFA also has a 3-bedroom AVAILABLE right now at eighteen hundred a month, all utilities included.',
+      units_note: 'NOTE: North Mountain Foothills has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Right now 1-bedroom, 2-bedroom AND 3-bedroom units are ALL AVAILABLE. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY, at one flat rate with no 6-month option. The 2-bedroom has a 12-month rate and a 6-month rate.',
       unit_types: {
-        '1br': { status: 'temporarily_unavailable', quotable: false },
+        '1br': {
+          status: 'available', quotable: true,
+          utils_spoken: 'one thousand, three hundred dollars', utils_num: 1300,
+          std12_utils_spoken: 'one thousand, three hundred dollars', std12_utils_num: 1300
+        },
         '2br': {
           status: 'available', quotable: true,
           sqft_line: '880 square feet, 2 bed, 1 and a half baths',
-          base_spoken: 'nine ninety five', base_spoken_alt: 'nine hundred ninety five', base_num: 995,
-          utils_spoken: 'twelve ninety five', utils_num: 1295,
-          std12_utils_spoken: 'fifteen hundred', std12_utils_num: 1500,
-          deposit_spoken: 'one thousand', deposit_spoken_es: 'mil', deposit_num: 1000,
-          special_term_months: 6
+          utils_spoken: 'one thousand, two hundred ninety five dollars', utils_num: 1295,
+          std12_utils_spoken: 'one thousand, five hundred dollars', std12_utils_num: 1500
         },
-        '3br': { status: 'not_offered' }
+        '3br': {
+          status: 'available', quotable: true,
+          utils_spoken: 'one thousand, eight hundred dollars', utils_num: 1800,
+          std12_utils_spoken: 'one thousand, eight hundred dollars', std12_utils_num: 1800
+        },
+        'studio': { status: 'not_available', quotable: false }
       }
     },
     windsong: {
       hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
       hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
-      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Availability is set by the store - see available_types. Never offer a unit type for a tour or application unless it is listed as available.',
+      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Right now 2-bedrooms are AVAILABLE; 1-bedrooms and 3-bedrooms are not available. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY when offered. The 2-bedroom has a 12-month rate and a 6-month rate.',
       unit_types: {
-        '1br': { status: 'not_available', quotable: false },
-        '2br': {
+        '1br': {
           status: 'not_available', quotable: false,
-          base_spoken: 'nine ninety five', base_spoken_alt: 'nine hundred ninety five', base_num: 995,
-          utils_spoken: 'twelve ninety five', utils_num: 1295,
-          movein_total_spoken: 'fourteen hundred', movein_total_spoken_es: 'mil cuatrocientos', movein_total_num: 1400,
-          movein_deposit_num: 900, movein_first_num: 500
+          utils_spoken: 'one thousand, three hundred dollars', utils_num: 1300,
+          std12_utils_spoken: 'one thousand, three hundred dollars', std12_utils_num: 1300
+        },
+        '2br': {
+          status: 'available', quotable: true,
+          utils_spoken: 'one thousand, two hundred ninety five dollars', utils_num: 1295,
+          std12_utils_spoken: 'one thousand, five hundred dollars', std12_utils_num: 1500
         },
         '3br': {
-          status: 'available', quotable: true,
-          base_spoken: 'fifteen hundred', base_num: 1500,
-          utils_spoken: 'eighteen hundred', utils_num: 1800,
-          movein_total_spoken: 'sixteen hundred fifty', movein_total_spoken_es: 'mil seiscientos cincuenta', movein_total_num: 1650,
-          movein_deposit_num: 900, movein_first_num: 750
-        }
+          status: 'not_available', quotable: false,
+          utils_spoken: 'one thousand, eight hundred dollars', utils_num: 1800,
+          std12_utils_spoken: 'one thousand, eight hundred dollars', std12_utils_num: 1800
+        },
+        'studio': { status: 'not_available', quotable: false }
       }
     }
   }
@@ -179,6 +186,597 @@ function validateContent(d) {
     }
     return true;
   } catch { return false; }
+}
+
+// ============================================================
+// 2026-11-11 voice quality helpers (BUILD_voice_fixes_2026-11-11)
+// Prompt rules alone were not enough for the 11-10 audit failures.
+// These helpers are unit-tested and applied to outbound turns, the
+// summary, and the lead-row action flag. They do not start the server.
+// ============================================================
+function isUsingFallbackContent(content) {
+  if (!content || !content.meta) return true;
+  if (content === DEFAULT_CONTENT) return true;
+  if (content.meta.updated_by === 'DEFAULT_CONTENT') return true;
+  if (content.meta.version === 0 || content.meta.version === '0') return true;
+  return false;
+}
+
+function isEitherOrQuestion(text) {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  return (/\bor\b/i.test(t) && /[?¿]/.test(t))
+    || /\b(resident or|prospect or|leasing or|maintenance or|current (tenant|resident) or)\b/i.test(t);
+}
+
+function isUnclearOneWordReply(text) {
+  const t = String(text || '').trim().replace(/[.,!?¿¡]+$/g, '').trim();
+  return /^(yes|no|yeah|yep|yup|nah|nope|ok|okay|okey|mhm|mmhm|uh huh|uhhuh|sure|si|sí|vale|bueno|ya)$/i.test(t);
+}
+
+function shouldAskOpenQuestion(conversation) {
+  const turns = (conversation || []).filter(m => m.role === 'user' || m.role === 'assistant');
+  let unclear = 0;
+  let awaiting = false;
+  for (const m of turns) {
+    if (m.role === 'assistant') {
+      if (isEitherOrQuestion(m.content)) {
+        awaiting = true;
+      } else if (awaiting && /\b(what (are you calling|can i help|is this about)|tell me .{0,60}(calling about|what you need)|in a few words|en pocas palabras|motivo de su llamada)\b/i.test(m.content || '')) {
+        return false;
+      }
+      continue;
+    }
+    if (awaiting) {
+      if (isUnclearOneWordReply(m.content)) unclear += 1;
+      else { awaiting = false; unclear = 0; }
+    }
+  }
+  return unclear >= 2;
+}
+
+const SAFE_REPLY_EN = 'How can I help you?';
+const SAFE_REPLY_ES = '¿En qué le puedo ayudar?';
+const OPEN_QUESTION_EN = 'Can you tell me in a few words what you are calling about today?';
+const OPEN_QUESTION_ES = '¿Puede decirme en pocas palabras el motivo de su llamada?';
+const YANELIA_MESSAGE_EN = 'Happy to take a message for Yanelia. Can I get your name and what you would like me to tell her?';
+const YANELIA_MESSAGE_ES = 'Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?';
+const MAINT_MESSAGE_ES = 'Con gusto le tomo el mensaje para mantenimiento. ¿Me puede dar su nombre, su unidad y el problema? Confirmo que le devolveremos la llamada a este número.';
+
+function callerAskedWhoYouAre(conversation) {
+  const turns = (conversation || []).filter(m => m.role === 'user');
+  const last = turns[turns.length - 1];
+  if (!last) return false;
+  const t = String(last.content || '');
+  // English: who is this / who are you / bot / robot / AI / real person / machine / recording
+  if (/\b(who are you|who is this|who(?:'s| is) this|who am i (?:speaking|talking|chatting)(?: (?:to|with))?|who(?:'s| is) (?:calling|on the (?:phone|line))|what(?:'s| is) your name|what are you)\b/i.test(t)) return true;
+  if (/\b(?:are|is) you (?:a |an )?(?:real )?(?:person|robot|human|ai|assistant|bot|machine)\b/i.test(t)) return true;
+  if (/\bare you (?:real|human|a bot)\b/i.test(t)) return true;
+  if (/\bis this (?:a |an )?(?:bot|robot|ai|assistant|machine|recording|real person|person|human)\b/i.test(t)) return true;
+  if (/\bam i (?:talking|speaking) to (?:a |an )?(?:real )?(?:person|human|bot|robot|ai|machine|assistant)\b/i.test(t)) return true;
+  if (/\bis this (?:even )?(?:a )?(?:real )?(?:person|human)\b/i.test(t)) return true;
+  // Spanish (formal and informal)
+  if (/(?:¿\s*)?(?:con qui[eé]n (?:hablo|estoy hablando|estoy hablando)|qui[eé]n (?:es|eres|es usted|habla)|con qui[eé]n hablo)/i.test(t)) return true;
+  if (/(?:¿\s*)?(?:eres|es usted|es esto|esto es|es) (?:un |una )?(?:robot|bot|grabaci[oó]n|persona|asistente|inteligencia|ia)\b/i.test(t)) return true;
+  if (/(?:¿\s*)?(?:es usted|eres) (?:una |un )?(?:persona|humano|humana)(?: real)?/i.test(t)) return true;
+  return false;
+}
+
+function stripTimeOfDayGreetingOnly_(text) {
+  // Only strip a leading time-of-day greeting when it is a standalone
+  // opening (punctuation or end), so "Good morning hours are 9 to 5"
+  // is left intact.
+  return String(text || '').replace(
+    /^\s*(good\s+(morning|afternoon|evening|day)|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches)(?:\s*[,!.]+|\s*$)\s*/i,
+    ''
+  );
+}
+
+function sanitizeGreeting(text, opts) {
+  opts = opts || {};
+  let t = String(text || '');
+  const alreadyPlayed = opts.isFirstAssistantTurn || opts.alreadyIntroduced;
+  if (alreadyPlayed) {
+    t = stripTimeOfDayGreetingOnly_(t);
+    if (!opts.callerAskedWhoYouAre) {
+      t = t.replace(/^\s*(hi|hello|hey)[,!.]?\s+(this is|i am|i'?m) the ai (leasing )?assistant[^.!?]*[.!?]\s*/i, '');
+      t = t.replace(/^\s*(this is|i am|i'?m) the ai (leasing )?assistant[^.!?]*[.!?]\s*/i, '');
+      t = t.replace(/^\s*thank you for calling[^.!?]*[.!?]\s*/i, '');
+      t = t.replace(/^\s*gracias por llamar[^.!?¡¿]*[.!?]\s*/i, '');
+      t = t.replace(/^\s*soy el asistente(?: de ia)?(?: de mattgab(?: management)?)?[^.!?¡¿]*[.!?]\s*/i, '');
+    }
+  }
+  if (opts.alreadyIntroduced && !opts.callerAskedWhoYouAre) {
+    t = t.replace(/\s*(this is|i am|i'?m) the ai (leasing )?assistant for mattgab management[.!]?\s*/ig, ' ');
+    t = t.replace(/\s*soy el asistente(?: de ia)?(?: de mattgab management)?[.!]?\s*/ig, ' ');
+  }
+  return t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function splitSentences_(text) {
+  return String(text || '').split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
+}
+
+function normalizeSentence_(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9áéíóúñü\s]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function contentTokens_(s) {
+  const stop = new Set(['i','im','i am','am','is','are','the','a','an','you','your','to','of','and','for','with','on','in','at','it','that','this','right','now','please','just']);
+  return normalizeSentence_(s).split(' ').filter(w => w && !stop.has(w));
+}
+
+const NUMBER_WORDS_RE = /\b(zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|once|doce|cien|ciento|mil)\b/g;
+const UNIT_TYPE_RE = /\b((?:1|2|3|one|two|three|uno|dos|tres)\s*(?:bed(?:room)?s?|br|rec[aá]maras?)|studio|estudio)\b/g;
+
+function distinctiveSets_(s) {
+  const n = normalizeSentence_(s);
+  const beds = new Set((n.match(UNIT_TYPE_RE) || []).map(x => x.replace(/\s+/g, ' ')));
+  const digits = new Set(n.match(/\d+/g) || []);
+  const words = new Set(n.match(NUMBER_WORDS_RE) || []);
+  return { beds, digits, words };
+}
+
+function distinctivesDiffer_(a, b) {
+  const A = distinctiveSets_(a);
+  const B = distinctiveSets_(b);
+  const differ = (sa, sb) => {
+    if (!sa.size && !sb.size) return false;
+    if (sa.size !== sb.size) return true;
+    for (const x of sa) if (!sb.has(x)) return true;
+    return false;
+  };
+  return differ(A.beds, B.beds) || differ(A.digits, B.digits) || differ(A.words, B.words);
+}
+
+function sentencesAreNearDuplicates_(a, b) {
+  const na = normalizeSentence_(a);
+  const nb = normalizeSentence_(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  // Do not collapse sentences that quote different unit types, digits, or number words.
+  if (distinctivesDiffer_(a, b)) return false;
+  const shorter = na.length <= nb.length ? na : nb;
+  const longer  = na.length <= nb.length ? nb : na;
+  if (longer.includes(shorter) && shorter.length / longer.length >= 0.8) return true;
+  const ta = contentTokens_(a);
+  const tb = contentTokens_(b);
+  if (!ta.length || !tb.length) return false;
+  if (ta.join(' ') === tb.join(' ')) return true;
+  const setA = new Set(ta);
+  const setB = new Set(tb);
+  let inter = 0;
+  for (const w of setA) if (setB.has(w)) inter++;
+  const union = new Set([...setA, ...setB]).size;
+  const jaccard = union ? inter / union : 0;
+  // High bar: tour-link vs application-link share many words and must NOT collapse.
+  return jaccard >= 0.92;
+}
+
+function dedupeRepeatedSentences(text) {
+  const parts = splitSentences_(text);
+  const kept = [];
+  for (const p of parts) {
+    if (kept.some(k => sentencesAreNearDuplicates_(k, p))) continue;
+    kept.push(p);
+  }
+  return kept.join(' ');
+}
+
+function hoursForbiddenPhrases_() {
+  return [
+    { re: /by appointment only/ig, key: 'by appointment only' },
+    { re: /sundays? closed/ig, key: 'sunday closed' },
+    { re: /closed on sundays?/ig, key: 'sunday closed' },
+    { re: /solo con cita/ig, key: 'solo con cita' },
+    { re: /domingo cerrado/ig, key: 'domingo cerrado' }
+  ];
+}
+
+function sentenceMentionsHours_(s) {
+  return /\b(hours|horario|open|opened|closed|cerrado|o'?clock|\d\s*a\.?m\.?|\d\s*p\.?m\.?)\b/i.test(s)
+    || (/\b(appointment|cita)\b/i.test(s) && /\b(office|oficina|hours|horario|open|abiert)/i.test(s));
+}
+
+function sentenceIsTourOrAppointmentBooking_(s) {
+  return /\b(tours?|showing|visit|recorrido|visita)\b/i.test(s);
+}
+
+function sentenceLooksSpanish_(s) {
+  return /[¿¡áéíóúñü]/i.test(s)
+    || /\b(horario|abiertos?|s[aá]bados?|domingo|cita|enlace|oficina|nuestro|nuestros)\b/i.test(s);
+}
+
+function sanitizeHoursInReply(text, property, opts) {
+  opts = opts || {};
+  const allowed = `${(property && property.hours) || ''} ${(property && property.hours_es) || ''}`.toLowerCase();
+  const forbiddenUsed = hoursForbiddenPhrases_().filter(p => {
+    p.re.lastIndex = 0;
+    const present = p.re.test(text || '');
+    p.re.lastIndex = 0;
+    if (!present) return false;
+    return !allowed.includes(p.key);
+  });
+  if (!forbiddenUsed.length) return String(text || '');
+  const parts = splitSentences_(text);
+  const anySpanishHoursHit = parts.some(p => {
+    const hits = forbiddenUsed.some(f => { f.re.lastIndex = 0; return f.re.test(p); });
+    return hits && !sentenceIsTourOrAppointmentBooking_(p) && sentenceMentionsHours_(p) && sentenceLooksSpanish_(p);
+  });
+  const useSpanish = !!(opts.isSpanish || anySpanishHoursHit) && !!(property && property.hours_es);
+  // On a Spanish call with no hours_es in the store, do not insert English hours.
+  const spanishWithoutStore = !!(opts.isSpanish || anySpanishHoursHit) && !(property && property.hours_es);
+  let canon = '';
+  if (useSpanish) {
+    canon = `Nuestro horario de oficina es ${property.hours_es}.`;
+  } else if (!spanishWithoutStore && property && property.hours) {
+    canon = `Our office hours are ${property.hours}.`;
+  }
+  const kept = [];
+  let replaced = false;
+  for (const p of parts) {
+    const hitsForbidden = forbiddenUsed.some(f => { f.re.lastIndex = 0; return f.re.test(p); });
+    if (hitsForbidden && sentenceIsTourOrAppointmentBooking_(p)) {
+      kept.push(p);
+      continue;
+    }
+    if (hitsForbidden && sentenceMentionsHours_(p)) {
+      if (!replaced && canon) { kept.push(canon); replaced = true; }
+      continue;
+    }
+    kept.push(p);
+  }
+  // Only insert the canonical hours line when an hours sentence was actually replaced.
+  return kept.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function isOnlyGreetingOrReintro_(text) {
+  let s = String(text || '').trim();
+  if (!s) return true;
+  s = stripTimeOfDayGreetingOnly_(s);
+  s = s.replace(/^\s*(hi|hello|hey)[,!.]?\s*/i, '');
+  s = s.replace(/(this is|i am|i'?m) the ai (leasing )?assistant[^.!?]*[.!?]?/ig, ' ');
+  s = s.replace(/thank you for calling[^.!?]*[.!?]?/ig, ' ');
+  s = s.replace(/gracias por llamar[^.!?¡¿]*[.!?]?/ig, ' ');
+  s = s.replace(/soy el asistente(?: de ia)?(?: de mattgab(?: management)?)?[^.!?¡¿]*[.!?]?/ig, ' ');
+  return !s.replace(/[ \t.,!?'"]+/g, ' ').trim();
+}
+
+function polishAssistantReply(text, opts) {
+  opts = opts || {};
+  const original = String(text || '');
+  let t = sanitizeGreeting(original, opts);
+  t = sanitizeHoursInReply(t, opts.property, opts);
+  t = dedupeRepeatedSentences(t);
+  t = String(t || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  if (t && !(isOnlyGreetingOrReintro_(t) && !opts.callerAskedWhoYouAre)) return t;
+  const fallback = stripTimeOfDayGreetingOnly_(original).replace(/[ \t]+/g, ' ').trim();
+  if (fallback && !(isOnlyGreetingOrReintro_(fallback) && !opts.callerAskedWhoYouAre)) return fallback;
+  return opts.isSpanish ? SAFE_REPLY_ES : SAFE_REPLY_EN;
+}
+
+function neverEmptyReply(text, opts) {
+  const t = String(text || '').trim();
+  if (t) return t;
+  return (opts && opts.isSpanish) ? SAFE_REPLY_ES : SAFE_REPLY_EN;
+}
+
+function hasCallerId(from) {
+  const s = String(from || '').trim();
+  if (!s || /^unknown$/i.test(s)) return false;
+  const digits = s.replace(/\D/g, '');
+  return digits.length >= 7;
+}
+
+function sanitizeSummaryCallback(text, from) {
+  const raw = String(text || '');
+  if (!hasCallerId(from)) return raw;
+  return raw
+    .replace(/\bno callback number was captured\b/gi, 'the caller ID is already on the lead row')
+    .replace(/\bno callback number (is |was )?(available|present|on (the|this) (row|lead|file))\b/gi, 'the caller ID is already on the lead row')
+    .replace(/\b(we )?(do not|don't) have a(n)? (callback )?number\b/gi, 'the caller ID is already on the lead row');
+}
+
+// Staff aliases. Canonical names only. Yaneli -> Yanelia, Hosie -> Jose.
+// Used at runtime by detectHumanAsk, detectFactualIntent, and staff routing helpers.
+const STAFF_ALIASES = {
+  yaneli: 'yanelia', yenelia: 'yanelia', janelia: 'yanelia', daniela: 'yanelia', janelle: 'yanelia', yanelia: 'yanelia',
+  hosie: 'jose', jose: 'jose', 'josé': 'jose', joseph: 'jose', 'hose-a': 'jose', hosea: 'jose',
+  viola: 'viola', viyola: 'viola', violeta: 'viola', biola: 'viola', fiola: 'viola', violet: 'viola',
+  brian: 'brian', bryan: 'brian', brain: 'brian', brien: 'brian', ryan: 'brian',
+  angel: 'angel', anjel: 'angel', angie: 'angel', angela: 'angel'
+};
+
+// Names no longer on the call tree but still recognized so we can give the
+// departure message instead of inventing a route. Not used for extensions.
+const STAFF_DEPARTED_ALIASES = {
+  felipa: 'felipa', salipa: 'felipa', filipa: 'felipa', felipe: 'felipa', falipa: 'felipa', philippa: 'felipa', phylipa: 'felipa',
+  stephany: 'stephany', stephanie: 'stephany', stefanie: 'stephany', estefani: 'stephany', estefany: 'stephany', tiffany: 'stephany'
+};
+
+function staffNameAlternation_() {
+  const names = new Set();
+  for (const k of Object.keys(STAFF_ALIASES)) names.add(k);
+  for (const k of Object.keys(STAFF_DEPARTED_ALIASES)) names.add(k);
+  return Array.from(names)
+    .sort((a, b) => b.length - a.length)
+    .map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+}
+
+function mentionsStaffName(text) {
+  const re = new RegExp('\\b(?:' + staffNameAlternation_() + ')\\b', 'i');
+  return re.test(String(text || ''));
+}
+
+function canonicalStaffName(heard) {
+  const t = String(heard || '').trim().toLowerCase().replace(/[.,!?¿¡]+$/g, '');
+  if (!t) return '';
+  if (STAFF_ALIASES[t]) return STAFF_ALIASES[t];
+  const ascii = t.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return STAFF_ALIASES[ascii] || '';
+}
+
+function staffHasKnownExtension(canonical) {
+  // Known call-tree extensions only. Do not invent one for Yanelia.
+  const map = { viola: '1', brian: '1', angel: '2', jose: '3' };
+  return map[canonical] || '';
+}
+
+function normalizeForMatch_(text) {
+  return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function hasExtremeHeat_(t) {
+  const s = normalizeForMatch_(t);
+  if (/\b(extreme(?:ly)?(?:\s+hot|\s+heat)?|heat wave|dangerous heat|hundred degrees|ola de calor|calor (extremo|peligroso)|peligroso por el calor)\b/.test(s)) return true;
+  // Only treat 100-139 as a temperature when it sits next to degrees/grados/°
+  // or in "it's NNN" / "hace NNN" style phrasing. Ignore numbers after unit,
+  // apartment, apt, #, unidad, or departamento (residents often give a unit).
+  const re = /\b(1[0-3]\d)\b/g;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    const start = m.index;
+    const end = start + m[1].length;
+    const before = s.slice(Math.max(0, start - 48), start);
+    const after = s.slice(end, end + 16);
+    if (/(?:unit|apartment|apt\.?|unidad|departamento|#)\s*(?:number|no\.?|num(?:ero)?)?\s*(?:is|es|:)?\s*$/i.test(before)) continue;
+    if (/^\s*(?:degrees?|grados|°)/i.test(after)) return true;
+    if (/(?:degrees?|grados|°)\s*$/i.test(before)) return true;
+    if (/(?:it(?:'?s|\s+is|\s+was)|\bits\b|hace|esta\s+a|outside|afuera)\s*$/i.test(before)) return true;
+  }
+  return false;
+}
+
+function isNoOrBrokenAc_(t) {
+  if (/\b(sin aire(?: acondicionado)?|no hay aire(?: acondicionado)?)\b/.test(t)) return true;
+  if (/\b(no (?:a\/?c|ac|air conditioning|air conditioner|cooling))\b/.test(t)) return true;
+  if (/\b(a\/?c|ac|air conditioning|air conditioner|aire acondicionado)\b/.test(t)
+      && /\b(out|down|broken|not working|isn'?t working|no funciona|descompuest|no sirve)\b/.test(t)) return true;
+  return false;
+}
+
+function hasDangerSignal_(t) {
+  return /\b(gas|fuga de gas|huele a gas|olor a gas|fire|flames?|en llamas|smoke|humo|burning smell|olor a quemado|sparks?|chispas|flood(?:ing|ed)?|inundacion|se inundo|burst|revento|water pouring|sewage|carbon monoxide|monoxido de carbono|electrical|electrico|on fire|peligro)\b/.test(t)
+    || hasExtremeHeat_(t);
+}
+
+function isTrueEmergency(text) {
+  const t = normalizeForMatch_(text);
+  if (!t.trim()) return false;
+  const fridge = /\b(refrigerator|fridge|freezer|congelador|refrigerador)\b/.test(t);
+  // A broken refrigerator is never an emergency unless a danger word is also present.
+  if (fridge && !hasDangerSignal_(t)) return false;
+
+  if (/\b(gas leak|smell(?:s|ing)? (?:of |like )?gas|smells like gas|like gas near|gas line|carbon monoxide|monoxido de carbono|fuga de gas|huele a gas|olor a gas)\b/.test(t)) return true;
+  // "electrical outlet is not working" alone is not an emergency; sparks,
+  // smoke, or burning from an outlet still are.
+  if (/\b(on fire|fire in|flames?|en llamas|i smell smoke|smell(?:s|ing)? smoke|burning smell|olor a (quemado|humo)|humo\b|sparks?(?: coming)?|sparking|chispas|electrical (fire|sparks?)|outlet spark)\b/.test(t)) return true;
+  if (/\b(?:something is burning|(?:is|are) burning)\b/.test(t)) return true;
+  if (/\b(?:stove|oven|estufa|horno)\b/.test(t) && /\b(?:smok(?:e|ing)|humo|quemando)\b/.test(t)) return true;
+  if (/\b(?:sparks?|sparking|smoke|smok(?:e|ing)|burning|chispas|humo|quemando)\b/.test(t)
+      && /\b(?:outlet|enchufe|tomacorriente)\b/.test(t)) return true;
+  if (/\b(flood(?:ing|ed)?|inundacion|se inundo|inundo mi|burst pipe|pipe burst|pipes? (?:has |have )?burst|has burst|se revento un tubo|tubo reventado|water (is )?pouring|sewage (back-?up|backing up)|desborde de (agua|alcantarilla))\b/.test(t)) return true;
+  // "water everywhere" is an emergency only when it is not just a fridge/appliance leak.
+  if (/\bwater everywhere\b/.test(t) && !fridge) return true;
+  if (/\b(no heat|no heating|sin calefaccion|no hay calefaccion|sin calenton|no tengo calefaccion)\b/.test(t)) return true;
+  if (/\b(heater|calefaccion|calenton)\b/.test(t)
+      && /\b(not working|is out|broken|isn'?t working|no funciona|descompuest)\b/.test(t)
+      && /\b(freezing|below zero|extreme cold|peligroso|hace mucho frio|it is (so )?cold)\b/.test(t)) return true;
+  if (isNoOrBrokenAc_(t) && hasExtremeHeat_(t)) return true;
+  if (/\b(locked out|cerrado (afuer|fuer)|me quede (afuer|fuera)|quedo (afuer|fuera))\b/.test(t)
+      && /\b(child|kid|baby|nino|nina|bebe|infant|toddler)\b/.test(t)) return true;
+  return false;
+}
+
+const APPLIANCE_RE = /\b(refrigerator|fridge|freezer|oven|stove|dishwasher|disposal|garbage disposal|sink|toilet|heater|hot water|outlet|thermostat|smoke detector|air conditioner|air conditioning|a\/?c\b|ac\b|washer|dryer|lavadora|estufa|horno|lavavajillas|fregadero|inodoro|calentador|calefacci[oó]n|calefaccion|refrigerador|congelador|aire acondicionado|tuber[ií]a|pipe|faucet|llave|grifo|microondas|microwave)\b/i;
+
+const PROBLEM_RE = /\b(broken|broke|is out|went out|is down|not working|isn'?t\s+(working|cooling|running|on|functioning)|won'?t\s+(work|turn|start|cool|run|flush|drain)|doesn'?t\s+(work|turn|start|cool|run|flush|drain)|does not work|stopped working|has stopped|it stopped|stopped(?!\s+by)|leaking|leak(?:s|ing)?|dripping|overflowing|clogged|backed up|no (?:cold|cool|hot water)|out of order|needs? (?:repair|fixing|to be fixed)|not cooling|isn'?t cooling|no funciona|no est[aá] funcionando|se descompuso|descompuest[oa]|gotea|goteando|est[aá] rot[oa]|no sirve|no enfr[ií]a|tapad[oa]|desbord)\b/i;
+
+const EXPLICIT_MAINT_REQUEST_RE = /\b(maintenance request|work order|request(?:ing)? maintenance|need(?:s| to)?(?: put in| file| submit)? (?:a )?maintenance|put in a (?:maintenance )?request|solicitud de mantenimiento|pedido de mantenimiento|reporte de mantenimiento|quiero reportar|necesito mantenimiento)\b/i;
+
+const RESIDENT_RE = /\b(i(?:'?m| am) a (?:current )?resident|this is a resident|i live (?:here|in|at)|soy residente|soy inquilin[oa]|vivo (?:aqu[ií]|en))\b/i;
+
+function isProspectRepairPolicyQuestion(text) {
+  const t = String(text || '').toLowerCase();
+  if (EXPLICIT_MAINT_REQUEST_RE.test(t) || (APPLIANCE_RE.test(t) && PROBLEM_RE.test(t))) return false;
+  if (/\b(who pays|are repairs included|what if something breaks|is that covered|repair cost|are repairs covered|what is the maintenance like|tell me about maintenance|mantenimiento las 24|24[-\s]?hour maintenance|how (?:fast|quickly) (?:are )?repairs|repairs handled|maintenance like)\b/.test(t)) return true;
+  // Amenity / feature questions about an appliance, with no problem signal.
+  if (/\b(does (?:it|the (?:apartment|unit|place)) come with|do you have|is there a|does the unit have|is the \w+ electric|incluye|tienen|hay un[oa]?)\b/.test(t)
+      && APPLIANCE_RE.test(t)
+      && !PROBLEM_RE.test(t)) return true;
+  return false;
+}
+
+function hasProblemNearAppliance_(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) return false;
+  const sentences = splitSentences_(raw);
+  if (!sentences.length) sentences.push(raw);
+  for (const s of sentences) {
+    if (APPLIANCE_RE.test(s) && PROBLEM_RE.test(s)) return true;
+  }
+  // If punctuation was missing, also check the whole utterance.
+  if (APPLIANCE_RE.test(raw) && PROBLEM_RE.test(raw)) return true;
+  return false;
+}
+
+function isMaintenanceIssue(text) {
+  const t = String(text || '');
+  if (!t.trim()) return false;
+  if (isProspectRepairPolicyQuestion(t)) return false;
+  if (EXPLICIT_MAINT_REQUEST_RE.test(t)) return true;
+  if (hasProblemNearAppliance_(t)) return true;
+  if (RESIDENT_RE.test(t) && PROBLEM_RE.test(t)) return true;
+  if (/\b(my|our|en mi|en el) (apartment|unit|apto|apartamento)\b/i.test(t) && PROBLEM_RE.test(t)) return true;
+  return false;
+}
+
+function recentUserTurns_(conversation, n) {
+  const turns = (conversation || []).filter(m => m.role === 'user').map(m => m.content || '');
+  if (!n) return turns;
+  return turns.slice(-Math.max(1, n));
+}
+
+function isMaintenanceCall(conversation, opts) {
+  opts = opts || {};
+  const slice = recentUserTurns_(conversation, opts.recentUserTurns);
+  const joined = slice.join('\n');
+  if (isTrueEmergency(joined) || slice.some(line => isTrueEmergency(line))) return true;
+  if (slice.some(line => isMaintenanceIssue(line))) return true;
+  // Appliance on one recent turn, problem on another.
+  if (slice.length > 1 && hasProblemNearAppliance_(joined)) return true;
+  return false;
+}
+
+function flagMaintenanceAction(existingAction, conversation, callerId) {
+  if (!isMaintenanceCall(conversation)) return existingAction || '';
+  const userText = recentUserTurns_(conversation).join('\n');
+  const emergency = isTrueEmergency(userText);
+  const prefix = emergency ? 'MAINTENANCE EMERGENCY:' : 'MAINTENANCE:';
+  const current = String(existingAction || '').trim();
+  if (/\bMAINTENANCE(\s+EMERGENCY)?:/i.test(current)) return current;
+  const idNote = hasCallerId(callerId) ? ' Callback number is the caller ID on the lead row.' : '';
+  const maintBody = 'Take the message (name, unit, issue) and give extension 3.' + idNote;
+  // Keep existing lead flags (TOUR REQUESTED, CALLBACK REQUESTED, etc.) visible.
+  if (current && !/no follow.?up/i.test(current)) {
+    return (current.replace(/[.;\s]+$/, '') + '; ' + prefix + ' ' + maintBody).substring(0, 240);
+  }
+  return (prefix + ' ' + maintBody).substring(0, 240);
+}
+
+function buildTurnSystemHints(conversation, opts) {
+  opts = opts || {};
+  let suffix = '';
+  if (shouldAskOpenQuestion(conversation)) {
+    const q = opts.isSpanish ? OPEN_QUESTION_ES : OPEN_QUESTION_EN;
+    suffix += '\n\nTHIS TURN ONLY: the caller has given two unclear one-word replies to an either/or question. Do not repeat the either/or. Ask one open question: "' + q + '"';
+  }
+  const recentEmergency = isTrueEmergency(recentUserTurns_(conversation, 3).join('\n'));
+  if (isMaintenanceCall(conversation, { recentUserTurns: 3 }) && !recentEmergency) {
+    const esHint = opts.isSpanish
+      ? ' If the call is in Spanish, use formal usted: "' + MAINT_MESSAGE_ES + '"'
+      : '';
+    suffix += '\n\nTHIS TURN ONLY: this appears to be a non-emergency maintenance call. Give extension three and take a maintenance message (name, unit, issue, confirm the callback number from this call). Use the emergency script whenever the caller describes danger to people or property, even if not listed. A broken refrigerator alone is not an emergency.' + esHint;
+  }
+  return suffix;
+}
+
+function commitAssistantReply(session, rawText, opts) {
+  opts = opts || {};
+  const spoken = neverEmptyReply(polishAssistantReply(rawText, opts), opts);
+  session.conversation = session.conversation || [];
+  session.conversation.push({ role: 'assistant', content: spoken });
+  session.replyCommitted = true;
+  return spoken;
+}
+
+function handleBargeIn(session, rawBufferedText, opts) {
+  // Turns are buffered and sent to TTS only after polish. If the caller
+  // barges in before that send, nothing was spoken — do not record the
+  // raw (unpolished, unspoken) buffer. If the reply was already sent,
+  // mark the last assistant turn as interrupted so history matches what
+  // the caller could have heard.
+  if (session && session.replyCommitted) {
+    const turns = session.conversation || [];
+    for (let i = turns.length - 1; i >= 0; i--) {
+      if (turns[i].role === 'assistant') {
+        if (!/\[cut off by caller\]/.test(turns[i].content || '')) {
+          turns[i].content = String(turns[i].content || '').trim() + ' [cut off by caller]';
+        }
+        return 'marked';
+      }
+    }
+    return 'marked';
+  }
+  return 'dropped';
+}
+
+function abortActiveGeneration(session) {
+  // Called at the top of every new 'prompt' turn. If a previous model
+  // stream is still generating, abort it and drop any unspoken buffered
+  // text so a mid-generation "hello?" cannot run two streams at once.
+  // Do nothing when no stream is active. A finished prior turn must not
+  // be tagged "[cut off by caller]" just because a new prompt arrived.
+  if (!session) return { aborted: false, bargeIn: null, clearedPending: false };
+  const stream = session.activeStream;
+  if (!stream) {
+    return { aborted: false, bargeIn: null, clearedPending: false };
+  }
+  const pending = session.pendingBufferedTurn || '';
+  session.pendingBufferedTurn = '';
+  session.activeStream = null;
+  // The in-flight text was never sent to TTS. Do not tag a previously
+  // committed (already spoken) reply as cut off.
+  session.replyCommitted = false;
+  let aborted = false;
+  if (typeof stream.abort === 'function') {
+    try { stream.abort(); } catch (err) { /* already ended */ }
+    aborted = true;
+  } else {
+    aborted = true;
+  }
+  const bargeIn = handleBargeIn(session, pending);
+  return { aborted: aborted, bargeIn: bargeIn, clearedPending: pending !== '' };
+}
+
+// Drive the websocket handler's text-processing path with the model stubbed.
+// Mirrors the 'prompt' case: push the user turn, run the factual intercept,
+// build per-turn system hints, polish/commit the model text (or drop it on
+// barge-in before TTS). SMS sending is not simulated here.
+function runPromptPipeline(session, userText, modelText, opts) {
+  opts = opts || {};
+  const preAbort = abortActiveGeneration(session);
+  session.conversation = session.conversation || [];
+  session.replyCommitted = false;
+  session.conversation.push({ role: 'user', content: userText });
+  const factualIntent = detectFactualIntent(userText);
+  if (factualIntent && !opts.skipFactual) {
+    const reply = buildFactualReply(factualIntent, session.property, session.isSpanish);
+    if (reply) {
+      const spoken = neverEmptyReply(reply, { isSpanish: session.isSpanish });
+      session.conversation.push({ role: 'assistant', content: spoken });
+      session.replyCommitted = true;
+      return { spoken: spoken, intercepted: factualIntent, hints: '', aborted: false, bargeIn: null, preAbort: preAbort };
+    }
+  }
+  const hints = buildTurnSystemHints(session.conversation, { isSpanish: !!session.isSpanish });
+  if (opts.abortBeforeSend) {
+    const outcome = handleBargeIn(session, modelText, { isSpanish: session.isSpanish });
+    return { spoken: '', intercepted: null, hints: hints, aborted: true, bargeIn: outcome, preAbort: preAbort };
+  }
+  const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
+  const spoken = commitAssistantReply(session, modelText, {
+    property: session.property,
+    isFirstAssistantTurn: isFirstAssistantTurn,
+    alreadyIntroduced: true,
+    callerAskedWhoYouAre: callerAskedWhoYouAre(session.conversation),
+    isSpanish: !!session.isSpanish
+  });
+  if (opts.abortAfterSend) {
+    handleBargeIn(session, modelText, { isSpanish: session.isSpanish });
+  }
+  return { spoken: spoken, intercepted: null, hints: hints, aborted: false, bargeIn: opts.abortAfterSend ? 'marked' : null, preAbort: preAbort };
 }
 
 // Fetch the content record, cache it, and NEVER throw. A fetch/parse/validate
@@ -282,6 +880,9 @@ function buildSystemPrompt(property, content) {
   //    accepting Section 8 is unchanged and still volunteered warmly. Source
   //    of income is not a federally protected class; familial status is.
   const CC   = content || DEFAULT_CONTENT;
+  const nmfaHoursCanon = (CC.properties.nmfa && CC.properties.nmfa.hours_en) || property.hours;
+  const windsongHoursCanon = (CC.properties.windsong && CC.properties.windsong.hours_en) || '';
+  const usingFallbackContent = isUsingFallbackContent(CC);
   const NM2  = CC.properties.nmfa.unit_types['2br'];       // NMFA 2-bedroom prices
   const WS2  = CC.properties.windsong.unit_types['2br'];   // Windsong 2-bedroom prices
   const WS3  = CC.properties.windsong.unit_types['3br'];   // Windsong 3-bedroom prices
@@ -336,12 +937,20 @@ function buildSystemPrompt(property, content) {
       ? 'On THIS line the one-bedroom is AVAILABLE NOW at "' + UNIT_PRICE['1br'] + '" a month, all utilities included, so confirm it and pivot to the tour.'
       : 'One-bedrooms are NOT available on THIS line right now. Say that, then give the all-in price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour.';
     const WORD = { '1br': 'one', '2br': 'two', '3br': 'three' };
+    const fallbackAvailabilityRule = usingFallbackContent
+      ? '\nFALLBACK MODE — THE LIVE PRICE LIST COULD NOT BE LOADED FOR THIS CALL:\nDo not state unit availability as a fact. If the caller asks whether a unit is available, say: "Let me have the office confirm current availability for you." You may mention the last known prices below as figures the office will confirm, and you may offer to have the office call them back.\n'
+      : '';
     const priceFigures = 'Valid all-in MONTHLY figures on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
       ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
         '"' + UNIT_PRICE[t] + '" (' + t.charAt(0) + '-bedroom, all utilities included \u2014 ' +
         (AVAIL.indexOf(t) !== -1 ? 'AVAILABLE now)' : 'NOT available; say only as "our ' + WORD[t] + '-bedroom, not available right now")')
       ).join(', ') + '.';
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
+${fallbackAvailabilityRule}
+GREETING AND DELIVERY RULES — CRITICAL:
+- The welcome greeting has ALREADY been played before your first turn. Never open a turn with "Good morning", "Good afternoon", "Good evening", "Good day", "Buenos días", "Buenas tardes", or "Buenas noches". Those time-of-day greetings are forbidden on every turn, including the first.
+- Never re-introduce yourself after the welcome greeting. Do not say "This is the AI leasing assistant", "I am the AI leasing assistant", "Thank you for calling", "Gracias por llamar", or "Soy el asistente" again, unless the caller directly asks who or what you are.
+- Never say two near-identical sentences in one turn. If you already said a sentence, do not repeat it with slightly different wording. One answer, then one question.
 
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
@@ -445,6 +1054,7 @@ SECTION 8 AND HOME INC:
 CONVERSATION PRINCIPLES
 ============================================================
 MEMORY: NEVER re-ask something already answered in this conversation. This includes whether the caller is a resident (maintenance) or a prospect (leasing) — once established, do not ask again, even after an interruption or an unclear reply. If a reply seems disconnected from your last question (for example, a stray name or a one-word answer that does not fit), ask the caller to repeat what they said rather than restarting qualification from scratch.
+EITHER/OR CLARIFICATION: If you asked an either/or question (for example "are you a current resident or a prospective renter?" or "is this about maintenance or leasing?") and the caller has now given two unclear one-word replies ("yes", "no", "okay", "yeah", "mhm", "sí") that do not choose an option, do NOT ask the either/or again. Ask one open question: "Can you tell me in a few words what you are calling about today?" If the call is in Spanish, use formal usted: "¿Puede decirme en pocas palabras el motivo de su llamada?"
 
 RESPONSE LENGTH: Maximum 2 sentences. One answer plus one question. Short and natural.
 
@@ -495,14 +1105,16 @@ MAINTENANCE
 ============================================================
 Guide first, escalate only if unresolved.
 
-EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me."
-SMOKE DETECTOR: Replace 9-volt battery. If continues, direct to portal.
-OUTLET: Press GFCI Reset button (bathroom or kitchen). If continues, direct to portal.
-GARBAGE DISPOSAL: Press red reset underneath. If continues, direct to portal.
-NO HOT WATER: Check breaker. If unresolved, direct to portal.
-THERMOSTAT: Check mode and batteries. If unresolved, direct to portal.
-WATER LEAK: Turn off supply valve immediately. Direct to portal right away.
-ALL OTHERS: Direct to portal. "Our team will follow up to schedule."
+EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat, or similar immediate danger): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me." Use this emergency script ONLY for those true emergencies.
+A broken refrigerator, a fridge that is not cooling, or a similar appliance problem is NOT an emergency. Do not use the emergency script for it.
+NON-EMERGENCY MAINTENANCE (including a broken refrigerator): on the SAME turn, do both of these: (1) give the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, read digit by digit, and (2) take a maintenance message for the lead row: first name if you do not already have it, the unit if they have one, the issue (repeat back what they said if they already told you), and confirm that the number they are calling from is the best callback number — that number is already on the lead from caller ID. Then say you will pass the message to the maintenance team. Never say you cannot take a message. Flag this internally as a maintenance call, not a leasing lead. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para mantenimiento. ¿Me puede dar su nombre, su unidad y el problema? Confirmo que le devolveremos la llamada a este número." Use the emergency script whenever the caller describes danger to people or property, even if not listed.
+SMOKE DETECTOR (non-emergency): Replace 9-volt battery. If it continues, give extension three and take the maintenance message, then offer the portal.
+OUTLET: Press GFCI Reset button (bathroom or kitchen). If it continues, give extension three and take the maintenance message, then offer the portal.
+GARBAGE DISPOSAL: Press red reset underneath. If it continues, give extension three and take the maintenance message, then offer the portal.
+NO HOT WATER: Check breaker. If unresolved, give extension three and take the maintenance message, then offer the portal.
+THERMOSTAT: Check mode and batteries. If unresolved, give extension three and take the maintenance message, then offer the portal.
+WATER LEAK (not a flood): Turn off the supply valve. Give extension three and take the maintenance message, and direct them to the portal as well. A burst pipe or flooding is an EMERGENCY, above.
+ALL OTHER NON-EMERGENCY ISSUES: Give extension three and take the maintenance message. You may also offer the portal. "Our team will follow up to schedule."
 COST (this applies in EVERY conversation, not only maintenance calls — a prospect asking who pays for repairs gets the same answer): Routine repairs ARE covered unless the resident caused the damage. You may state that general rule. You must NOT decide whether the caller's own repair is covered, because that depends on what caused it and only the office determines it. NEVER say "at no charge", "no cost", "free of charge", "that's covered" or "we cover that" about their specific repair, not even to reassure someone who says they will not pay. Say: "Routine repairs are covered unless the damage was caused by the resident, and the office decides that when they review the request." Spanish: "Las reparaciones de rutina están cubiertas a menos que el residente haya causado el daño, y la oficina lo determina al revisar su solicitud de mantenimiento." If they then ask whether their own repair is covered, say you cannot tell from the call and the office will determine it from the request. Then offer the portal link as normal. Never promise that anyone will call the resident back about cost.
 
 Whenever you direct a non-emergency issue to the portal, proactively offer to text the portal link on that same turn — do not wait for the caller to ask. Say: "Would you like me to text you the portal link so you can submit that easily?" Wait for consent ("yes", "sure", "okay", "please do") before sending. Once consent is given, say: "I am sending you the portal link right now."
@@ -541,13 +1153,15 @@ LANGUAGE RULES
 ============================================================
 OFFICE HOURS RULE — CRITICAL
 ============================================================
-When the caller asks any general question about office hours ("what are your hours", "when are you open", "are you open Saturday", "what days are you open", etc.) WITHOUT naming a staff member, answer with EXACTLY the canonical hours string for this property and NOTHING else. Read it as written, do not paraphrase, do not invent additional days, do not add "closed on weekends" or "closed Sunday" language unless that exact phrase is in the canonical string.
+This rule applies whenever you state hours: a direct hours question, a maintenance turn, a "speak to a person" or message turn, and after you give a staff number. If hours were not asked, you may omit them; if you do mention hours, they must be the canonical string and nothing else.
+
+When the caller asks any general question about office hours ("what are your hours", "when are you open", "are you open Saturday", "what days are you open", etc.) WITHOUT naming a staff member, answer with EXACTLY the canonical hours string for this property and NOTHING else. Read it as written, do not paraphrase, do not invent additional days or times, do not add "by appointment only" or "Sunday closed" or "closed on weekends" language unless that exact phrase is in the canonical string. Never invent hours.
 
 CANONICAL HOURS FOR THIS CALL: "${property.hours}."
 
-After stating the hours, follow with ONE short next step like "Would you like me to send you the tour link so you can pick a time?" Never end on the hours alone.
+After stating the hours on an hours question, follow with ONE short next step like "Would you like me to send you the tour link so you can pick a time?" Never end on the hours alone. On a maintenance or "speak to a person" turn, after any hours you state, continue with the message / extension steps for that turn.
 
-If the caller asks about a specific staff member's hours (Felipa, Stephany, Viola, Brian, Angel, Jose, Yanelia, or any of their alias variants), use the per-person hours from the STAFF-TO-EXTENSION MAPPING rule below, NOT this canonical string.
+If the caller asks about a specific staff member's hours (Felipa, Stephany, Viola, Brian, Angel, Jose, Yanelia, or any of their alias variants), use the per-person hours from the STAFF-TO-EXTENSION MAPPING rule below, NOT this canonical string. Per-person hours are also taken from the store, not invented.
 
 ============================================================
 RULES
@@ -560,8 +1174,8 @@ RULES
 - NEVER send to office unless emergency or caller asks for a person.
 - Person requested: main office line ${property.phone}, ${property.hours}, and offer to take a message for a callback (see TAKE THE MESSAGE above). NEVER give this AI line (${property.ai_number}) as a way to reach staff — it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
-- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are Monday through Friday, nine AM to six PM, and Saturday, ten AM to four PM." Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing, so when the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA AND STEPHANY NO LONGER WORK HERE: if a caller asks for either one, do not route to them and do not say why they left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," or for Stephany "Stephany is no longer with us. Viola handles leasing now and can help you with anything Stephany would have," then give Viola's NMFA number and hours (extension one, as above). Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are Monday through Friday, nine AM to five PM, and Saturday, ten AM to three PM." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is no longer on the call tree; say "Yanelia is not on our office line right now, but you can reach the team at six oh two, nine nine seven, two nine two eight and they'll take a message." For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
-- NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; give the departure message from the mapping above, then offer Viola): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A. For Yanelia: Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
+- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are ${nmfaHoursCanon}." Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing, so when the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA AND STEPHANY NO LONGER WORK HERE: if a caller asks for either one, do not route to them and do not say why they left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," or for Stephany "Stephany is no longer with us. Viola handles leasing now and can help you with anything Stephany would have," then give Viola's NMFA number and hours (extension one, as above). Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are ${windsongHoursCanon}." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
+- NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; give the departure message from the mapping above, then offer Viola): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A, Hosie. For Yanelia (still with NMFA; take a message, do not invent an extension): Yaneli, Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Estoy emocionado de conocerte, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
 
@@ -634,7 +1248,7 @@ function extractCallerName(session) {
   // "To the office" becomes "the office" and is still rejected.
   const stripIntro = (s) => String(s).trim()
     .replace(/^[¿¡]+\s*/, '')
-    .replace(/^(my name is|i'?m|i am|this is|me llamo|soy|mi nombre es|to|for)\s+/i, '')
+    .replace(/^(mi primer nombre es|my (?:first|1st) name is|first name'?s|first name is|my name is|i'?m|i am|this is|me llamo|soy|mi nombre es|to|for)\s+/i, '')
     .trim();
 
   // Walk turns. After each AI ask, grab the next caller turn and try to validate.
@@ -656,7 +1270,7 @@ function extractCallerName(session) {
     .filter(m => m.role !== 'system')
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
-  const intro = lines.match(/CALLER:[^\n]*?(?:my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
+  const intro = lines.match(/CALLER:[^\n]*?(?:mi primer nombre es|my (?:first|1st) name is|first name'?s|first name is|my name is|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{1,40})/i);
   // FIX 2026-09-01 (lead 1060). A caller turn that is a QUESTION is not a turn
   // in which someone gives their name. "CALLER: I'm sorry?" matched here and
   // stored the name "sorry" for a caller the AI itself correctly called Laura.
@@ -719,7 +1333,7 @@ function isValidName_(s) {
   // was stored as a prospect named Gracias. Checked before adding: the \b anchor
   // and the first-word-only test mean real names are untouched, so "Yamileth"
   // survives "ya", "Nadia" survives "nada", and "Claudia" survives "claro".
-  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale)\b/i;
+  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale|not important|not|none|private|unknown|why|important|confidential|anonymous)\b/i;
   // Strip accents (decompose + drop combining marks) so accented affirmations
   // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
   const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
@@ -814,6 +1428,10 @@ If the caller engaged at all but the call ended WITHOUT a captured name AND WITH
 
 If the caller asked for a person, asked for a manager or a named staff member, or left a message for the team, NEVER use "No follow-up needed". Set action to start with "CALLBACK REQUESTED:" followed by what the caller wants in a few words (for example "CALLBACK REQUESTED: asking whether their deposit was received"). Never put a dollar figure in this field that the caller did not say. If the caller gave a different callback number, include it in the summary.
 
+CALLER ID: ${session.from && String(session.from).trim() && !/^unknown$/i.test(String(session.from).trim()) ? ('The lead row already has this caller\'s phone number from caller ID (' + session.from + '). NEVER write that no callback number was captured, that a callback number is missing, or that you do not have a number to call back. You may say the caller confirmed this number, or that they gave a different callback number if they did.') : 'No caller ID is on the row. Only then may you say that no callback number was captured.'}
+
+If this call is a maintenance or work-order call (including a broken refrigerator), start the action with "MAINTENANCE:" (or "MAINTENANCE EMERGENCY:" only for a true emergency). Record the name, unit if given, the issue, and that the callback number is the caller ID unless they gave a different one.
+
 Caller: ${callerName}
 Property: ${propertyName}
 
@@ -833,8 +1451,8 @@ Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summar
     const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     const parsed = JSON.parse(clean);
     return {
-      ai_summary: String(parsed.summary || '').trim().substring(0, 1000),
-      ai_action:  String(parsed.action  || '').trim().substring(0, 240),
+      ai_summary: sanitizeSummaryCallback(String(parsed.summary || '').trim().substring(0, 1000), session.from),
+      ai_action:  sanitizeSummaryCallback(String(parsed.action  || '').trim().substring(0, 240), session.from),
     };
   } catch (err) {
     console.error('Call summary generation failed:', err.message);
@@ -917,7 +1535,7 @@ async function postLeadToDashboard(session) {
   // Detect from the caller's OWN words that they want a person, so the flag staff
   // sort on does not depend on Haiku obeying its prompt.
   function detectHumanAsk_(t) {
-    var NAME = '(viola|viyola|violeta|biola|fiola|violet|brian|bryan|brain|brien|stephany|stephanie|stefanie|estefani|estefany|tiffany|angel|anjel|angie|angela|jose|jos\u00e9|joseph|hose-a|yanelia|yenelia|janelia|daniela|janelle|felipa|salipa|filipa|felipe|falipa|philippa|phylipa)(?![a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1])';
+    var NAME = '(' + staffNameAlternation_() + ')(?![a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1])';
     var ASK = new RegExp(
       // ask for a person, generically ("with with" = real transcript stutter)
       '\\b(speak|talk|talking|spoke|chat) (to|with) ((to|with) )?(a |an |the |your |some )?(actual |real |live |human )?(someone|somebody|person|human|representative|rep|agent|manager|supervisor|operator|office|leasing|staff|live|real)s?\\b'
@@ -940,6 +1558,8 @@ async function postLeadToDashboard(session) {
       // explicit routing requests
       + '|\\btransfer me\\b|\\bput me through\\b|\\bconnect me\\b'
       + '|\\b(need|want|get me|give me|requesting) (a |an |the |your )?(supervisor|manager|representative|operator|person|human|someone|somebody)\\b'
+      + '|\\b(i |we )?(want|need|asking for) (to (speak|talk) (to|with) )?(mr\\.? |ms\\.? |mrs\\.? )?' + NAME
+      + '|\\b' + NAME + ' please\\b'
       + '|\\bis there (a |an )?(human|person|real person|live person|someone|somebody)\\b'
       // the feature is called callback capture - so detect asking for one
       + '|\\bcall(ing)? me back\\b'
@@ -977,9 +1597,10 @@ async function postLeadToDashboard(session) {
   }
   // --- END detectHumanAsk ---
   const humanAsk = detectHumanAsk_(callerTurns);
-  if (humanAsk && !/^CALLBACK REQUESTED:/i.test(ai_action_final || '')) {
-    const detail = (ai_action_final && !/no follow.?up/i.test(ai_action_final)) ? ` ${ai_action_final}` : ' Caller asked for a person; see transcript for the reason.';
-    ai_action_final = `CALLBACK REQUESTED:${detail}`.substring(0, 240);
+  ai_action_final = flagMaintenanceAction(ai_action_final, session.conversation, session.from);
+  if (humanAsk && !/CALLBACK REQUESTED/i.test(ai_action_final || '')) {
+    const detail = (ai_action_final && !/no follow.?up/i.test(ai_action_final)) ? ' ' + ai_action_final : ' Caller asked for a person; see transcript for the reason.';
+    ai_action_final = ('CALLBACK REQUESTED:' + detail).substring(0, 240);
   }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
@@ -1105,7 +1726,7 @@ function detectFactualIntent(text) {
 
   // If the caller named a staff member, defer to the LLM so it can
   // give per-person extension + hours from the routing rule.
-  if (/\b(brian|bryan|brien|felipa|stephany|stephanie|stefanie|estefani|salipa|filipa|felipe|falipa|angel|anjel|angie|angela|jose|jos[eé]|joseph|yanelia|yenelia|janelia|daniela)\b/i.test(t)) {
+  if (mentionsStaffName(t)) {
     return null;
   }
 
@@ -1224,6 +1845,7 @@ fastify.register(async function(fastify) {
             // See the gate below: consent survives the agent asking their name.
             smsConsent: false,
             activeStream: null,
+            pendingBufferedTurn: '',
             conversation: [
               { role: 'system', content: buildSystemPrompt(property, content) }
             ]
@@ -1236,6 +1858,10 @@ fastify.register(async function(fastify) {
         case 'prompt': {
           const session = sessions.get(ws.callSid);
           if (!session) break;
+          // If a previous turn is still generating, abort it and drop any
+          // unspoken buffered text so a mid-generation "hello?" cannot
+          // start a second stream on the same session.
+          abortActiveGeneration(session);
           const text = msg.voicePrompt || '';
           console.log(`Caller said: ${text}`);
 
@@ -1273,6 +1899,7 @@ fastify.register(async function(fastify) {
             }
           }
 
+          session.replyCommitted = false;
           session.conversation.push({ role: 'user', content: text });
 
           // PRE-LLM INTERCEPT for hard-to-LLM factual questions (hours).
@@ -1282,11 +1909,13 @@ fastify.register(async function(fastify) {
           // forbidding it. This guarantees correctness for high-stakes facts.
           const factualIntent = detectFactualIntent(text);
           if (factualIntent) {
-            const reply = buildFactualReply(factualIntent, session.property, session.isSpanish);
-            if (reply) {
-              console.log(`Factual intent intercepted: ${factualIntent} → ${reply}`);
-              ws.send(JSON.stringify({ type: 'text', token: reply, last: true }));
-              session.conversation.push({ role: 'assistant', content: reply });
+            const factReply = buildFactualReply(factualIntent, session.property, session.isSpanish);
+            if (factReply) {
+              const spoken = neverEmptyReply(factReply, { isSpanish: session.isSpanish });
+              console.log(`Factual intent intercepted: ${factualIntent} → ${spoken}`);
+              ws.send(JSON.stringify({ type: 'text', token: spoken, last: true }));
+              session.conversation.push({ role: 'assistant', content: spoken });
+              session.replyCommitted = true;
               break;
             }
           }
@@ -1294,25 +1923,42 @@ fastify.register(async function(fastify) {
           try {
             let fullResponse = '';
             let aborted = false;
+            let systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish });
             const stream = anthropic.messages.stream({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 200,
-              system: session.conversation[0].content,
+              system: systemForTurn,
               messages: session.conversation.slice(1),
             });
             session.activeStream = stream;
+            session.pendingBufferedTurn = '';
 
+            // Buffer the turn, then sanitize (greeting / hours / repeated sentences)
+            // before sending to TTS. max_tokens is 200, so the delay is one short
+            // reply. Incremental send would let a bad greeting reach the caller
+            // before a sanitizer could take it back.
             stream.on('text', (token) => {
               fullResponse += token;
-              ws.send(JSON.stringify({ type: 'text', token, last: false }));
+              if (session.activeStream === stream) session.pendingBufferedTurn = fullResponse;
             });
 
             stream.on('finalMessage', async () => {
               if (aborted) return;
+              // A later prompt may have already aborted and replaced this stream.
+              if (session.activeStream !== stream) return;
               session.activeStream = null;
-              ws.send(JSON.stringify({ type: 'text', token: '', last: true }));
-              session.conversation.push({ role: 'assistant', content: fullResponse });
-              console.log(`AI said: ${fullResponse}`);
+              session.pendingBufferedTurn = '';
+              const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
+              const spoken = commitAssistantReply(session, fullResponse, {
+                property: session.property,
+                isFirstAssistantTurn,
+                alreadyIntroduced: true,
+                callerAskedWhoYouAre: callerAskedWhoYouAre(session.conversation),
+                isSpanish: session.isSpanish
+              });
+              fullResponse = spoken;
+              ws.send(JSON.stringify({ type: 'text', token: spoken, last: true }));
+              console.log(`AI said: ${spoken}`);
 
               // Detect and send SMS links (tour checked FIRST)
               const intent = detectSmsIntent(fullResponse);
@@ -1344,12 +1990,17 @@ fastify.register(async function(fastify) {
             // consistent with "withhold rather than risk an unwanted send."
             stream.on('abort', () => {
               aborted = true;
+              // If abortActiveGeneration already superseded or cleared this
+              // stream, do not clear a newer stream or re-handle barge-in.
+              if (session.activeStream !== stream) return;
               session.activeStream = null;
-              if (fullResponse) {
-                session.conversation.push({ role: 'assistant', content: fullResponse + ' [cut off by caller]' });
-                console.log(`AI cut off by interruption: ${fullResponse}`);
+              session.pendingBufferedTurn = '';
+              const outcome = handleBargeIn(session, fullResponse, { isSpanish: session.isSpanish });
+              if (outcome === 'dropped') {
+                console.log('AI cut off by interruption before any text was spoken');
               } else {
-                console.log('AI cut off by interruption before any text was generated');
+                const last = [...(session.conversation || [])].reverse().find(m => m.role === 'assistant');
+                console.log(`AI cut off by interruption: ${(last && last.content) || fullResponse}`);
               }
             });
 
@@ -1359,7 +2010,9 @@ fastify.register(async function(fastify) {
             // would drop, not just this one. Always keep a listener here.
             stream.on('error', (error) => {
               if (aborted) return;
+              if (session.activeStream !== stream) return;
               session.activeStream = null;
+              session.pendingBufferedTurn = '';
               console.error('Claude stream error:', error.message);
               const fallback = session.isSpanish
                 ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
@@ -1443,8 +2096,11 @@ End of transcript
   });
 });
 
-// Start server
-fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
-  if (err) { console.error(err); process.exit(1); }
-  console.log(`Mattgab Voice AI server running on port ${PORT}`);
-});
+// Start server only when this file is the process entry point.
+// Tests load helpers from the source text and must not start a listener.
+if (require.main === module) {
+  fastify.listen({ port: PORT, host: '0.0.0.0' }, (err) => {
+    if (err) { console.error(err); process.exit(1); }
+    console.log(`Mattgab Voice AI server running on port ${PORT}`);
+  });
+}
