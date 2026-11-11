@@ -316,7 +316,9 @@ function sanitizeGreeting(text, opts) {
   }
   if (opts.alreadyIntroduced && !opts.callerAskedWhoYouAre) {
     t = t.replace(/\s*(this is|i am|i'?m) the ai (leasing )?assistant for mattgab management[.!]?\s*/ig, ' ');
-    t = t.replace(/\s*soy el asistente(?: de ia)?(?: de mattgab management)?[.!]?\s*/ig, ' ');
+    // Pass 12: drop the WHOLE intro sentence ("Soy el asistente ... Mattgab Management."), only where a sentence
+    // starts. The old pattern cut just "Soy el asistente de IA" and left "de arrendamiento de ..." behind.
+    t = t.replace(/(?<=^|[.!?]\s*)soy el asistente[^.!?¡¿]*(?:[.!?]\s*|$)/ig, '');
   }
   return t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -2008,7 +2010,8 @@ function extractCallerName(session) {
   const convo = session.conversation;
 
   // AI's name-asking phrasings, English + Spanish
-  const askPattern = /(may i (get|have|ask) your name|can i (get|grab|have) your (first )?name|what(?:'s| is) your (first )?name|your (first )?name please|may i ask who is calling|who do i have the pleasure|who am i speaking (with|to)|¿cuál es tu (primer )?nombre|¿puedo (obtener|saber) tu nombre|¿me puedes (decir|dar) tu nombre|¿me das tu nombre|¿con quién tengo el gusto)/i;
+  // Pass 12: the last alternatives are formal (usted) Spanish asks; the agent speaks usted, so the tu-forms never matched on a Spanish call.
+  const askPattern = /(may i (get|have|ask) your name|can i (get|grab|have) your (first )?name|what(?:'s| is) your (first )?name|your (first )?name please|may i ask who is calling|who do i have the pleasure|who am i speaking (with|to)|¿cuál es tu (primer )?nombre|¿puedo (obtener|saber) tu nombre|¿me puedes (decir|dar) tu nombre|¿me das tu nombre|¿con quién tengo el gusto|(?:me )?(?:puede|podr[ií]a|pudiera) (?:dar|decir|proporcionar)(?:me)? su (?:primer )?nombre|cu[aá]l es su (?:primer )?nombre|su (?:primer )?nombre,? por favor|(?:me )?(?:da|dice) su (?:primer )?nombre|puedo (?:obtener|saber|tener) su nombre|c[oó]mo se llama usted)/i;
 
   // Strip common name-intro phrases so "My name is Claudette" reduces to "Claudette".
   // Also strip leading inverted-Spanish punctuation that speech-to-text sometimes prepends
@@ -2128,6 +2131,9 @@ function isValidName_(s) {
   // reject real surnames like "De La Cruz".
   // Merged 2026-08-28: of|for|with|by|about|number added to the original list.
   if (/^(in|at|on|of|for|from|with|by|about|apt|apto|apartment|apartamento|unit|unidad|building|bldg|edificio|room|number)\b/i.test(t)) return false;
+  // Pass 12: a Spanish answer that starts with an article/possessive plus more words is a sentence about the problem
+  // ("el refrigerador no funciona"), not a name. Needed now that formal Spanish name asks are recognised.
+  if (/^(el|los|las|mi|mis)\s+\S/i.test(t)) return false;
   // Reject any name containing question marks (regular or Spanish inverted).
   // Speech-to-text occasionally prepends "¿" or appends "?"; either signals
   // the transcript treated the utterance as a question, not a name.
@@ -2390,6 +2396,8 @@ async function postLeadToDashboard(session) {
         property: session.property?.key || '',
         name:     callerName,
         phone:    session.from,
+        // Pass 12: language of the call, so a Spanish call is not stored as 'en' (lead-api.php defaults to 'en').
+        language: session.isSpanish ? 'es' : 'en',
         summary,
         status:   'new',
         ai_summary,
