@@ -713,7 +713,7 @@ function buildTurnSystemHints(conversation, opts) {
     if (isBareMessageRequest_(lastUser)) {
       suffix += '\n\nTHIS TURN ONLY: the caller said only "' + String(lastUser).trim().slice(0, 40).replace(/["`\\$]/g, '') + '". That is a request to leave a message for the team. Do NOT ask what they are calling about, do NOT give the office number. ' +
         (opts.isSpanish ? 'Say, in formal usted: "Claro. \u00bfMe puede dar su nombre?" ' : 'Say: "Of course. Can I get your first name?" ') +
-        'Then, one question per turn, ask what they want to tell the team and the best callback number, and confirm.';
+        'Then, one question per turn, ask what they want to tell the team and the best callback number, and confirm. If they give a different callback number, read it back once, digit by digit, when you confirm.';
     }
   }
   const recentEmergency = isTrueEmergency(recentUserTurns_(conversation, 3).join('\n'));
@@ -799,6 +799,15 @@ function twoTermPriceTextEs_(ut) {
   const a12 = fmtMoney_(ut.std12_utils_num) + ' al mes con contrato de 12 meses';
   const a6 = fmtMoney_(ut.utils_num) + ' al mes con contrato de ' + six.months + ' meses';
   return leadsWithSix_(ut) ? a6 + ', o ' + a12 : a12 + ', o ' + a6;
+}
+// D-20261112-22 v36: 1BR and 3BR must be spoken as twelve-month only.
+// twoTermPriceText_ itself is unchanged (it still returns "<price> a month" for
+// single-term units) so existing helper tests keep their contract. Prompt and
+// units-block call sites use this wrapper.
+function priceWithTermText_(ut, fb) {
+  const body = twoTermPriceText_(ut, fb);
+  if (sixMonthOption_(ut)) return body;
+  return body + ' on a twelve-month lease only';
 }
 
 // A distinct shorter-term ongoing option, or null. Pass 8: offered together with the
@@ -1623,8 +1632,8 @@ function renderUnitsBlock(key, content) {
   const sq = (t) => (p.unit_types[t] && p.unit_types[t].sqft_line) ? ' ' + p.unit_types[t].sqft_line + '.' : '';
   return '\n' + order.filter(t => p.unit_types[t]).map(t =>
     avail.indexOf(t) !== -1
-      ? label[t] + ': ' + twoTermPriceText_(p.unit_types[t], price[t]) + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
-      : label[t] + ': ' + price[t] + ' a month, all utilities included \u2014 NOT available right now.'
+      ? label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]) + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
+      : label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]) + ', all utilities included. NOT available right now, coming available soon.'
   ).join('\n');
 }
 
@@ -1730,11 +1739,12 @@ function buildSystemPrompt(property, content) {
     const comingLine_ = (u) => ({ en: ((u && u.coming_available_en) || COMING_EN), es: ((u && u.coming_available_es) || COMING_ES) });
     const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
       AVAIL.indexOf(t) !== -1
-        ? '- ' + UNIT_LABEL[t] + ': "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included." AVAILABLE NOW - offer it for a tour.'
-        : '- ' + UNIT_LABEL[t] + ': NOT available right now, coming available soon. Say "' + UNIT_PRICE[t] + ' a month" ONLY as "our ' + UNIT_LABEL[t] + ', which is not available right now."' +
-          (PUT[t].quotable ? ' Then say the coming-soon line: "' + comingLine_(PUT[t]).en + '" (Spanish, usted: "' + comingLine_(PUT[t]).es + '").' : '') +
+        ? '- ' + UNIT_LABEL[t] + ': "' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included." AVAILABLE NOW - offer it for a tour.'
+        : '- ' + UNIT_LABEL[t] + ': NOT available right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included."' +
+          (PUT[t].quotable ? ' Coming-soon line, English: "' + comingLine_(PUT[t]).en + '" (Spanish, usted: "' + comingLine_(PUT[t]).es + '").' : '') +
           ' Never say it is available. Never offer it for a tour or application.'
     ).join('\n');
+    const twelveMonthOnlyRule = '\n- The 1-bedroom and the 3-bedroom are twelve-month leases only, at both properties. Say "twelve months only" whenever you give their price. Do not offer a six-month option for them.';
     const offerableList = AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now';
     // 2026-09-17: the two sentences below were still hardcoded prose after the 09-02
     // store change - "one-bedrooms are NOT available at either property" and a price
@@ -1796,13 +1806,13 @@ function buildSystemPrompt(property, content) {
         : Object.keys(OPT).filter(t => OPT[t] && OPT[t].quotable && OPT[t].status === 'available');
       const oLines = ['1br', '2br', '3br'].filter(t => OPT[t]).map(t => {
         const u = OPT[t];
-        const priceWords = twoTermPriceText_(u, '') + (sixMonthOption_(u) ? '' : ' on a twelve-month lease only');
+        const priceWords = priceWithTermText_(u, '');
         if (OAVAIL.indexOf(t) !== -1) {
           return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': AVAILABLE NOW. "' + priceWords + ', all utilities included."';
         }
         if (u.quotable && (u.utils_spoken || u.std12_utils_spoken)) {
           const c = comingLine_(u);
-          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. Say the price, then the coming-soon line. Price: "' + priceWords + ', all utilities included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWords + ', all utilities included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
         }
         return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now. Do not quote a price. Offer to connect the caller with our office or add them to the waiting list.';
       }).join('\n');
@@ -1847,13 +1857,13 @@ ${property.units}
 PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
 - Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. Apart from the two lease options of a unit listed above, NEVER present two prices or a choice up front. NEVER say the word "bill". NEVER say "most people choose".
 - THIS LINE IS ${property.key === 'nmfa' ? 'NMFA' : 'WINDSONG'}. ${availSentence}
-${unitLines}${sixMonthRule}${marketRentRule}
+${unitLines}${sixMonthRule}${marketRentRule}${twelveMonthOnlyRule}
 - After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 ${otherPropertyBlock}
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
-- If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer or price a unit that is not AVAILABLE NOW.
+- If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.
 
 MOVE-IN COST:
 ${moveInCostRule}
@@ -2006,8 +2016,8 @@ TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the 
 1. "Can I get your first name?"
 2. "And what would you like me to tell the team?" (If they already said why they are calling, skip this and repeat the reason back in one short phrase instead.)
 3. "Is the number you're calling from the best one for a callback?" If they say no, ask them to say the best number slowly.
-Then confirm: "Thank you, [Name]. I'll pass this to the team and they'll call you back during office hours." Then ask "Is there anything else I can help you with?"
-BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
+Then confirm. If the caller gave a different callback number, read that number back once, digit by digit: "Thank you, [Name]. I'll pass this to the team and they'll call you back at [their number, digit by digit] during office hours." If they said the number they are calling from is best, do not read a number back; say: "Thank you, [Name]. I'll pass this to the team and they'll call you back during office hours." Then ask "Is there anything else I can help you with?"
+BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence. If the caller gave a different callback number, read that number back once, digit by digit, in the confirmation: "Thank you, [Name]. I have your message, and I'll call you back at [their number, digit by digit]." If they said the number they are calling from is best, do not read a number back; say: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
 Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
@@ -2258,6 +2268,59 @@ function cleanName_(s) {
 }
 
 // ============================================================
+// CALLBACK NUMBER from the caller's own words (D-20261112-22 v36)
+// ============================================================
+// The lead POST used to store only session.from (Twilio caller ID). When a
+// caller gave a different callback number, it lived only in the transcript,
+// so the dashboard phone field did not match the number they asked us to use
+// (staging test, lead 200040). These helpers read ONLY caller/user turns, so
+// a number Leo read (the office line) is never stored as the callback.
+function normalizeUsPhone_(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.charAt(0) === '1') return '+1' + digits.slice(1);
+  if (digits.length === 10) return '+1' + digits;
+  return '';
+}
+
+function phonesInText_(text) {
+  const t = String(text || '');
+  const found = [];
+  const written = /(?:\+?1[\s.-]?)?\(?\b(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})\b/g;
+  let m;
+  while ((m = written.exec(t))) {
+    const n = normalizeUsPhone_(m[1] + m[2] + m[3]);
+    if (n) found.push(n);
+  }
+  const WORD = {
+    zero: '0', oh: '0', one: '1', two: '2', three: '3', four: '4', five: '5',
+    six: '6', seven: '7', eight: '8', nine: '9',
+    cero: '0', uno: '1', dos: '2', tres: '3', cuatro: '4', cinco: '5',
+    seis: '6', siete: '7', ocho: '8', nueve: '9'
+  };
+  const spokenRe = /\b(?:(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)(?:\s+|,)+\s*){9,12}(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b/gi;
+  while ((m = spokenRe.exec(t))) {
+    const words = m[0].toLowerCase().split(/[\s,]+/).filter(Boolean);
+    const digits = words.map(function (w) { return WORD[w]; }).filter(function (d) { return d; }).join('');
+    const n = normalizeUsPhone_(digits);
+    if (n) found.push(n);
+  }
+  return found;
+}
+
+function extractCallbackNumber_(session) {
+  const callerId = normalizeUsPhone_(session && session.from);
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  let last = '';
+  for (let i = 0; i < turns.length; i++) {
+    const m = turns[i];
+    if (!m || m.role !== 'user') continue;
+    const nums = phonesInText_(m.content || '');
+    if (nums.length) last = nums[nums.length - 1];
+  }
+  return last || callerId || '';
+}
+
+// ============================================================
 // GENERATE CALL SUMMARY + ACTION RECOMMENDATION
 // ============================================================
 // At end-of-call, we ask Claude Haiku to produce two things:
@@ -2395,7 +2458,17 @@ async function postLeadToDashboard(session) {
   // accents cost two bytes each, so the ceiling in characters is lower than it
   // looks. 15,000 characters cannot exceed the column even if every character were
   // four bytes, and is roughly three times the longest call we have ever recorded.
-  const summary = `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 15000)}`;
+  let storedPhone = session.from;
+  try {
+    const extracted = extractCallbackNumber_(session);
+    if (extracted) storedPhone = extracted;
+  } catch (e) { storedPhone = session.from; }
+  const callbackDiffers = (function () {
+    const a = normalizeUsPhone_(storedPhone), b = normalizeUsPhone_(session.from);
+    return !!(a && b && a !== b);
+  })();
+  let summary = (callbackDiffers ? ('CALLBACK NUMBER GIVEN: ' + storedPhone + '. Inbound caller ID (the number this call came from) was ' + session.from + '.\n') : '') +
+    `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 15000)}`;
 
   // Generate the AI summary + action in parallel-ish with the network call.
   // Awaiting here adds ~1-2s to the post-call writeback, which is fine
@@ -2513,7 +2586,7 @@ async function postLeadToDashboard(session) {
         source:   'twilio_voice',
         property: session.property?.key || '',
         name:     callerName,
-        phone:    session.from,
+        phone:    storedPhone,
         // Pass 12: language of the call, so a Spanish call is not stored as 'en' (lead-api.php defaults to 'en').
         language: session.isSpanish ? 'es' : 'en',
         summary,
