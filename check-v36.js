@@ -216,6 +216,34 @@ test('callback number comes from caller turns only, written or spoken', () => {
   assert.deepEqual(api.phonesInText_('the rent is $1,300 and the three bedroom is $1,800'), []);
 });
 
+test('v37 accepts spaced, comma, and mixed digit runs and ignores short figures', () => {
+  const phone = '+16029972928';
+  assert.deepEqual(api.phonesInText_('6 0 2 9 9 7 2 9 2 8'), [phone]);
+  assert.deepEqual(api.phonesInText_('6, 0, 2, 9, 9, 7, 2, 9, 2, 8'), [phone]);
+  assert.deepEqual(api.phonesInText_('six oh two 997 2928'), [phone]);
+  assert.deepEqual(api.phonesInText_('six oh two, nine nine seven, two nine two eight'), [phone]);
+  assert.deepEqual(api.phonesInText_('602-997-2928'), [phone]);
+  assert.deepEqual(api.phonesInText_('my number is 6029972928'), [phone]);
+  assert.deepEqual(api.phonesInText_('6 0 2 9 9 7 9 2 8'), []);
+  assert.deepEqual(api.phonesInText_('1,300 a month, 12 month lease'), []);
+  assert.deepEqual(api.phonesInText_('1 6 0 2 9 9 7 2 9 2 8'), [phone]);
+
+  assert.equal(api.extractCallbackNumber_({
+    from: '+14805551212',
+    conversation: [
+      { role: 'assistant', content: 'The office line is 6 0 2 9 9 7 2 9 2 8.' },
+      { role: 'user', content: '6 0 2 9 9 7 2 9 2 8' },
+    ],
+  }), phone);
+  assert.equal(api.extractCallbackNumber_({
+    from: '+14805551212',
+    conversation: [
+      { role: 'assistant', content: '6 0 2 9 9 7 2 9 2 8' },
+      { role: 'user', content: 'Yes, the number I am calling from is the best one.' },
+    ],
+  }), '+14805551212');
+});
+
 test('a different callback is the lead phone and the caller ID stays in the notes; a confirmation keeps caller ID', () => {
   function decide(session) {
     let storedPhone = session.from;
