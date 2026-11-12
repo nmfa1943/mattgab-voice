@@ -2268,13 +2268,14 @@ function cleanName_(s) {
 }
 
 // ============================================================
-// CALLBACK NUMBER from the caller's own words (D-20261112-22 v36)
+// CALLBACK NUMBER from the caller's own words (D-20261112-22 v36, v37)
 // ============================================================
 // The lead POST used to store only session.from (Twilio caller ID). When a
 // caller gave a different callback number, it lived only in the transcript,
 // so the dashboard phone field did not match the number they asked us to use
 // (staging test, lead 200040). These helpers read ONLY caller/user turns, so
 // a number Leo read (the office line) is never stored as the callback.
+// v37: also parse spaced single digits from STT (lead 200043: "6 0 2 9 9 7 2 9 2 8").
 function normalizeUsPhone_(raw) {
   const digits = String(raw || '').replace(/\D/g, '');
   if (digits.length === 11 && digits.charAt(0) === '1') return '+1' + digits.slice(1);
@@ -2285,11 +2286,11 @@ function normalizeUsPhone_(raw) {
 function phonesInText_(text) {
   const t = String(text || '');
   const found = [];
+  const push = function (n) { if (n && found.indexOf(n) === -1) found.push(n); };
   const written = /(?:\+?1[\s.-]?)?\(?\b(\d{3})\)?[\s.-]?(\d{3})[\s.-]?(\d{4})\b/g;
   let m;
   while ((m = written.exec(t))) {
-    const n = normalizeUsPhone_(m[1] + m[2] + m[3]);
-    if (n) found.push(n);
+    push(normalizeUsPhone_(m[1] + m[2] + m[3]));
   }
   const WORD = {
     zero: '0', oh: '0', one: '1', two: '2', three: '3', four: '4', five: '5',
@@ -2301,9 +2302,27 @@ function phonesInText_(text) {
   while ((m = spokenRe.exec(t))) {
     const words = m[0].toLowerCase().split(/[\s,]+/).filter(Boolean);
     const digits = words.map(function (w) { return WORD[w]; }).filter(function (d) { return d; }).join('');
-    const n = normalizeUsPhone_(digits);
-    if (n) found.push(n);
+    push(normalizeUsPhone_(digits));
   }
+  // v37: Twilio STT on the Window 10 test (lead 200043) wrote the callback as
+  // spaced single digits ("6 0 2 9 9 7 2 9 2 8"). The written regex wants
+  // 3-3-4 groups and the spoken regex wants word digits, so both missed it
+  // and the lead stored the caller ID. Walk number-words and digit tokens
+  // and accept a 10-digit run, or 11 digits with a leading 1. Shorter runs
+  // (prices, "1,300 a month, 12 month lease", a 9-digit fragment) are ignored.
+  const tokens = t.toLowerCase().match(/[a-z]+|\d+/g) || [];
+  let run = '';
+  const flush = function () {
+    push(normalizeUsPhone_(run));
+    run = '';
+  };
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    const d = Object.prototype.hasOwnProperty.call(WORD, tok) ? WORD[tok] : (/^\d+$/.test(tok) ? tok : null);
+    if (d != null) run += d;
+    else flush();
+  }
+  flush();
   return found;
 }
 
