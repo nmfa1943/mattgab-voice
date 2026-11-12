@@ -474,7 +474,7 @@ function isOnlyGreetingOrReintro_(text) {
 
 function polishAssistantReply(text, opts) {
   opts = opts || {};
-  const original = String(text || '');
+  const original = stripMarkdownForSpeech_(String(text || ''));   // D-20261112-22: plain spoken text only
   let t = sanitizeGreeting(original, opts);
   t = sanitizeHoursInReply(t, opts.property, opts);
   t = dedupeRepeatedSentences(t);
@@ -695,12 +695,26 @@ function flagMaintenanceAction(existingAction, conversation, callerId) {
   return (prefix + ' ' + maintBody).substring(0, 240);
 }
 
+// D-20261112-22: a caller whose whole reply is "message" (or "leave a message", "mensaje", "recado") wants to leave one.
+const BARE_MESSAGE_RE_ = /^\s*(?:(?:hi|hello|hey|um|uh|yes|yeah|a|the|just|i\s+want\s+to|i\s+would\s+like\s+to|i'd\s+like\s+to|quiero|quisiera)[\s,]+)*(?:leave\s+(?:a\s+)?|dejar\s+(?:un\s+)?)?(?:messages?|mensaje|un\s+mensaje|recado|un\s+recado)\s*[.!?]*\s*$/i;
+function isBareMessageRequest_(text) {
+  return BARE_MESSAGE_RE_.test(String(text || ''));
+}
+
 function buildTurnSystemHints(conversation, opts) {
   opts = opts || {};
   let suffix = '';
   if (shouldAskOpenQuestion(conversation)) {
     const q = opts.isSpanish ? OPEN_QUESTION_ES : OPEN_QUESTION_EN;
     suffix += '\n\nTHIS TURN ONLY: the caller has given two unclear one-word replies to an either/or question. Do not repeat the either/or. Ask one open question: "' + q + '"';
+  }
+  {
+    const lastUser = recentUserTurns_(conversation, 1).join(' ');
+    if (isBareMessageRequest_(lastUser)) {
+      suffix += '\n\nTHIS TURN ONLY: the caller said only "' + String(lastUser).trim().slice(0, 40).replace(/["`\\$]/g, '') + '". That is a request to leave a message for the team. Do NOT ask what they are calling about, do NOT give the office number. ' +
+        (opts.isSpanish ? 'Say, in formal usted: "Claro. \u00bfMe puede dar su nombre?" ' : 'Say: "Of course. Can I get your first name?" ') +
+        'Then, one question per turn, ask what they want to tell the team and the best callback number, and confirm.';
+    }
   }
   const recentEmergency = isTrueEmergency(recentUserTurns_(conversation, 3).join('\n'));
   if (isMaintenanceCall(conversation, { recentUserTurns: 3 }) && !recentEmergency) {
@@ -875,9 +889,6 @@ const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los
 // that a reduction exists.
 const NO_SPECIAL_REPLY_EN = 'Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour.';
 const NO_SPECIAL_REPLY_ES = 'El precio depende de la aprobación de su solicitud, y nuestro equipo de arrendamiento le explicará todos los términos cuando venga a la visita.';
-// Pass 14: the one approved rent-due / late-fee answer (Jenea, 2026-11-11 9:41 PM AZ). Spanish is formal usted with every number spelled as a word.
-const RENT_DUE_REPLY_EN = 'Rent is due on the 1st. After the 5-day grace period, a $50 late fee applies.';
-const RENT_DUE_REPLY_ES = 'La renta vence el día primero de cada mes. Después del período de gracia de cinco días, se aplica un cargo por pago tardío de cincuenta dólares.';
 
 // The MOVE-IN COST body of the system prompt. Quotes store figures when the
 // store has them and the content is live; otherwise (fallback mode, or no
@@ -1386,11 +1397,46 @@ function p11SpanishSentenceToWords_(sn) {
   return s;
 }
 
+// ---------------------------------------------------------------------------
+// D-20261112-22 (2026-11-12): plain spoken text only. The 10:22 AM test call read "asterisk, asterisk" before each
+// unit because the model wrote bold (**) and the text went straight to TTS. This removes markdown from anything that
+// is spoken or kept as the assistant turn: **bold**, *italic*, __bold__, _italic_, ~~strike~~, `code`, # headings,
+// > quotes, bullet markers, horizontal rules, and [text](url) links (keeps the text). Lines of a list are joined into
+// sentences. Plain text without markdown is returned unchanged. Never throws.
+// ---------------------------------------------------------------------------
+function stripMarkdownForSpeech_(text) {
+  const orig = String(text == null ? '' : text);
+  try {
+    if (!/[*_`#\[~>]|^[ \t]*[-+\u2022\u00b7][ \t]/m.test(orig)) return orig;
+    let s = orig;
+    s = s.replace(/!?\[([^\]\n]+)\]\((?:[^)\s]+)(?:\s+"[^"]*")?\)/g, '$1');   // [text](url) -> text
+    s = s.replace(/```[a-z]*\n?/gi, '').replace(/`/g, '');                      // code fences and backticks
+    s = s.replace(/^[ \t]*(?:[-*_]){3,}[ \t]*$/gm, '');                          // horizontal rules
+    s = s.replace(/^[ \t]{0,3}#{1,6}[ \t]*/gm, '');                              // # headings
+    s = s.replace(/^[ \t]*>[ \t]?/gm, '');                                       // > quotes
+    s = s.replace(/^[ \t]*(?:[-*+\u2022\u00b7])[ \t]+/gm, '');                   // bullet markers
+    s = s.replace(/(\*\*|__)(?=\S)([\s\S]+?)(?<=\S)\1/g, '$2');                  // **bold** and __bold__
+    s = s.replace(/~~(?=\S)([^~\n]+?)(?<=\S)~~/g, '$1');                         // ~~strike~~
+    s = s.replace(/\*(?=\S)([^*\n]+?)(?<=\S)\*/g, '$1');                         // *italic*
+    s = s.replace(/(?<![\w])_(?=\S)([^_\n]+?)(?<=\S)_(?![\w])/g, '$1');          // _italic_
+    s = s.replace(/\*+/g, '');                                                   // any stray asterisk
+    s = s.replace(/(^|\s)#+(?=\s|$)/g, '$1');                                    // a lone # token
+    if (/\n/.test(s)) {
+      const lines = s.split(/\n+/).map(l => l.trim()).filter(Boolean);
+      s = lines.map((l, i) => (i < lines.length - 1 && !/[.!?:;,]$/.test(l)) ? l + '.' : l).join(' ');
+    }
+    s = s.replace(/[ \t]{2,}/g, ' ').trim();
+    return s || orig.replace(/[*_`#~>]/g, '').trim();
+  } catch (e) {
+    return orig;
+  }
+}
+
 // What actually goes to the voice. Spanish sentences get number words; English sentences are untouched. The language is
 // picked per sentence from its own words, falling back to the whole reply, then to the session flag. Never throws.
 function speakableReply_(text, isSpanish) {
   try {
-    const t = String(text == null ? '' : text);
+    const t = stripMarkdownForSpeech_(text);   // D-20261112-22: never speak markdown
     if (!/\d/.test(t)) return t;
     const whole = replyIsSpanish_(t, !!isSpanish);
     // split on sentence ends, but not after an abbreviation that is followed by its number ("ext. 3", "a.m.")
@@ -1678,10 +1724,16 @@ function buildSystemPrompt(property, content) {
       || (AVAIL.filter(t => UNIT_LABEL[t]).length
             ? 'Right now our ' + AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') + ' are AVAILABLE.'
             : 'Availability is limited right now - check with the office before offering a tour.');
+    // D-20261112-22: a unit that is quotable but not available carries the store's coming-soon line, in both languages.
+    const COMING_EN = 'Coming available soon. I can connect you with our office or add you to our waiting list.';
+    const COMING_ES = 'Estar\u00e1 disponible pronto. Puedo ponerle en contacto con nuestra oficina o agregarle a nuestra lista de espera.';
+    const comingLine_ = (u) => ({ en: ((u && u.coming_available_en) || COMING_EN), es: ((u && u.coming_available_es) || COMING_ES) });
     const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
       AVAIL.indexOf(t) !== -1
         ? '- ' + UNIT_LABEL[t] + ': "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included." AVAILABLE NOW - offer it for a tour.'
-        : '- ' + UNIT_LABEL[t] + ': say "' + UNIT_PRICE[t] + ' a month" ONLY as "our ' + UNIT_LABEL[t] + ', which is not available right now." Never offer it for a tour or application.'
+        : '- ' + UNIT_LABEL[t] + ': NOT available right now, coming available soon. Say "' + UNIT_PRICE[t] + ' a month" ONLY as "our ' + UNIT_LABEL[t] + ', which is not available right now."' +
+          (PUT[t].quotable ? ' Then say the coming-soon line: "' + comingLine_(PUT[t]).en + '" (Spanish, usted: "' + comingLine_(PUT[t]).es + '").' : '') +
+          ' Never say it is available. Never offer it for a tour or application.'
     ).join('\n');
     const offerableList = AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now';
     // 2026-09-17: the two sentences below were still hardcoded prose after the 09-02
@@ -1725,12 +1777,52 @@ function buildSystemPrompt(property, content) {
       (promoUnits.length
         ? ' Two-term units, BOTH figures are valid and are always given together: ' + promoUnits.map(t => t.charAt(0) + '-bedroom "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + '"').join(', ') + '.'
         : '');
+    // ── The OTHER property (D-20261112-22) ─────────────────────────────────
+    // The 10:22 AM test call on the NMFA line: asked about Windsong, the agent said Windsong "does have one bedroom and
+    // three bedroom units available". Root cause: this prompt carried availability and prices ONLY for THIS line.
+    // About the other property it said only "plus the other Mattgab property", so the model borrowed this line's own
+    // units (all AVAILABLE NOW at NMFA) and prices. Windsong's 1BR/3BR are quotable but NOT available (D-18). The facts
+    // for the other property now come from the same store, in the same words, and the prompt forbids guessing.
+    const OTHER_KEY = property.key === 'nmfa' ? 'windsong' : 'nmfa';
+    const OTHER_NAME = OTHER_KEY === 'nmfa' ? 'North Mountain Foothills (NMFA)' : 'Windsong';
+    const OP = CC.properties[OTHER_KEY] || {};
+    const OPT = OP.unit_types || {};
+    let otherPropertyBlock = '';
+    if (usingFallbackContent || !Object.keys(OPT).length) {
+      otherPropertyBlock = '\nTHE OTHER PROPERTY (' + OTHER_NAME + '): the live price list could not be loaded, so do NOT state which units are available there and do NOT quote its prices. If asked, say: "Let me have the office confirm current availability for you."\n';
+    } else {
+      const OAVAIL = Array.isArray(OP.available_types)
+        ? OP.available_types
+        : Object.keys(OPT).filter(t => OPT[t] && OPT[t].quotable && OPT[t].status === 'available');
+      const oLines = ['1br', '2br', '3br'].filter(t => OPT[t]).map(t => {
+        const u = OPT[t];
+        const priceWords = twoTermPriceText_(u, '') + (sixMonthOption_(u) ? '' : ' on a twelve-month lease only');
+        if (OAVAIL.indexOf(t) !== -1) {
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': AVAILABLE NOW. "' + priceWords + ', all utilities included."';
+        }
+        if (u.quotable && (u.utils_spoken || u.std12_utils_spoken)) {
+          const c = comingLine_(u);
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. Say the price, then the coming-soon line. Price: "' + priceWords + ', all utilities included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
+        }
+        return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now. Do not quote a price. Offer to connect the caller with our office or add them to the waiting list.';
+      }).join('\n');
+      const oAvailSentence = OAVAIL.filter(t => UNIT_LABEL[t]).length
+        ? OTHER_NAME + ' units available right now: ' + OAVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') + '.'
+        : OTHER_NAME + ' has no unit available right now.';
+      otherPropertyBlock = '\nTHE OTHER PROPERTY, ' + OTHER_NAME + ' (USE ONLY THESE FACTS WHEN A CALLER ASKS ABOUT IT):\n' +
+        '- ' + oAvailSentence + '\n' + oLines + '\n' +
+        '- Availability at ' + OTHER_NAME + ' is separate from this line. NEVER assume ' + OTHER_NAME + ' has a unit available because this line does, and NEVER say a ' + OTHER_NAME + ' unit is available unless it is listed AVAILABLE NOW above. Say "not available right now" for the others, never "available".\n' +
+        '- For a ' + OTHER_NAME + ' unit listed NOT AVAILABLE with a price: give the price, then the coming-soon line exactly as written above. Do not offer a tour or an application for it.\n' +
+        '- The 1-bedroom and the 3-bedroom are twelve-month leases only, at both properties. Say "twelve months only" whenever you give their price. Do not offer a six-month option for them.\n' +
+        '- For a tour or an application at ' + OTHER_NAME + ', offer to connect the caller with our office. Never read the other property\'s facts as if they were this line\'s.\n';
+    }
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 ${fallbackAvailabilityRule}
 GREETING AND DELIVERY RULES — CRITICAL:
 - The welcome greeting has ALREADY been played before your first turn. Never open a turn with "Good morning", "Good afternoon", "Good evening", "Good day", "Buenos días", "Buenas tardes", or "Buenas noches". Those time-of-day greetings are forbidden on every turn, including the first.
 - Never re-introduce yourself after the welcome greeting. Do not say "This is the AI leasing assistant", "I am the AI leasing assistant", "Thank you for calling", "Gracias por llamar", or "Soy el asistente" again, unless the caller directly asks who or what you are.
 - Never say two near-identical sentences in one turn. If you already said a sentence, do not repeat it with slightly different wording. One answer, then one question.
+- PLAIN SPOKEN TEXT ONLY. Everything you write is read aloud by a text-to-speech voice. Never use markdown or any formatting: no asterisks, no bold or italics, no pound signs, no backticks, no bullet points, no numbered lists, no dashes used as bullets, and no links in brackets. Write short, plain spoken sentences. To list units, say them in one flowing sentence ("our one bedroom is X, our two bedroom is Y").
 
 ADDRESS RULE:
 Always state the NMFA address as exactly "1943 West Aster Drive, Phoenix Arizona" and the Windsong address as exactly "1414 North 34th Street, Phoenix Arizona". Never paraphrase, abbreviate, or transpose digits.
@@ -1758,6 +1850,7 @@ PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
 ${unitLines}${sixMonthRule}${marketRentRule}
 - After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
+${otherPropertyBlock}
 - Never give availability dates. Offer only units marked AVAILABLE NOW.
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
 - If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer or price a unit that is not AVAILABLE NOW.
@@ -1787,12 +1880,6 @@ CONDITIONS:
 - A question about the PRICE of a unit, or about the regular or comparison price, or the price together with the deposit, is NOT a conditions question: give the listed price(s) (both 2-bedroom lease options together, and the deposit / move-in figures if asked) and never answer with the approval sentence alone.
 - PRECEDENCE for "is that a special?": if the caller asks whether the six-month price, the twelve-month price or either lease option is a special, a promotion or a deal, answer FIRST with "It is simply one of our two lease options" and THEN add the approval sentence above. This wins over the general conditions line. For any other special / catch / conditions question use the approval sentence alone.
 - Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
-
-RENT DUE DATE AND LATE FEE:
-- If a caller (resident or prospect) asks when rent is due, about the rent due date, a late fee, the grace period, or what happens if rent is paid late, answer with EXACTLY this and nothing more:
-  - English: "${RENT_DUE_REPLY_EN}"
-  - Spanish: "${RENT_DUE_REPLY_ES}"
-- Say it as written. Do NOT add a posting day, any other fee amount, partial-payment rules, payment methods, or any exception. If the caller asks anything beyond that wording, say our leasing team can go over it, and offer to have the office follow up. Never promise to waive a fee.
 
 PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - The AI agent does NOT quote specials, discounts or move-in offers. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, do NOT hint that one exists or might exist. Give the listed price and say: English: "${NO_SPECIAL_REPLY_EN}" Spanish: "${NO_SPECIAL_REPLY_ES}" NEVER state a dollar amount for any reduction, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, and any monthly rate lower than the ones in the pricing block. Move-in totals are quoted only as set out in the MOVE-IN COST rule.
@@ -1920,6 +2007,7 @@ TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the 
 2. "And what would you like me to tell the team?" (If they already said why they are calling, skip this and repeat the reason back in one short phrase instead.)
 3. "Is the number you're calling from the best one for a callback?" If they say no, ask them to say the best number slowly.
 Then confirm: "Thank you, [Name]. I'll pass this to the team and they'll call you back during office hours." Then ask "Is there anything else I can help you with?"
+BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
 Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
@@ -2188,6 +2276,51 @@ function cleanName_(s) {
 // Returns { ai_summary, ai_action } on success, or empty strings on error.
 // Failure is non-fatal — the lead still posts without the AI fields.
 // ============================================================
+// D-20261112-22: summary and action text for the dashboard: plain text, one line, no markdown, no em or en dashes,
+// and no HTML entities (the dashboard escapes text once itself; an entity here would show as literal "&#039;").
+function cleanSummaryText_(v) {
+  let t = stripMarkdownForSpeech_(String(v == null ? '' : v));
+  t = t.replace(/&#0?39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+  t = t.replace(/\s*[\u2014\u2013]\s*/g, ', ').replace(/\s*\n+\s*/g, ' ');
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+// D-20261112-22: the end-of-call summary prompt, as a pure function so it can be tested.
+function buildCallSummaryPrompt_(session, callerName, propertyName, transcript) {
+  return `You are writing the one-line call note that office staff read on the dashboard, from a voice call transcript at Mattgab Management. Produce a JSON object with exactly two keys: "summary" and "action".
+
+"summary" is ONE short line, at most 220 characters, no line breaks, no markdown, no dashes used as separators. Shape: CATEGORY: who called, which property, what they want. Examples of the shape (the names here are placeholders, never reuse them): "PROSPECT: [first name] at NMFA asked about the 2 bedroom and was sent the tour link." "MESSAGE: Unknown caller at Windsong wants to leave a message for the office, no details given." "MAINTENANCE: [first name] at NMFA, unit [number], refrigerator not cooling."
+- CATEGORY is exactly one of: PROSPECT (wants to rent, tour, apply, or asked about prices or availability), RESIDENT (a current resident with an account, rent, lease or building question that is not a repair), MAINTENANCE (a repair or work order), VENDOR (a vendor, contractor or salesperson), MESSAGE (wants to leave a message or reach a person or the office), OTHER (wrong number, hang up, anything else).
+- Who: the caller's first name only if they gave one, otherwise "Unknown caller". NEVER invent or guess a name.
+- Property: say NMFA or Windsong, using the Property line below.
+- What they want: a few plain words (the unit size, the question, the issue). Include a commitment made (tour link sent, application link sent, callback expected) only if the AI really made it.
+- NO PII in the line. No last names, no phone numbers (the lead row already has the caller ID), no email addresses, no street addresses, no account, card or ID numbers. A unit number is fine for maintenance. Do not include filler.
+
+PRICES IN THE SUMMARY: the transcript contains prices spoken as words. Convert each to its correct dollar figure: "nine ninety five" is $995, "eleven hundred" is $1,100, "twelve ninety five" is $1,295, "fourteen hundred" is $1,400, "fifteen hundred" is $1,500, "sixteen hundred fifty" is $1,650, "seventeen fifty" is $1,750, "eighteen hundred" is $1,800, "one thousand" is $1,000. The same figures may appear spelled out in full ("one thousand, two hundred ninety five dollars"); treat those identically. NEVER write a monthly rent or deposit as a cents or decimal amount such as $12.95 or $17.50; those are wrong by a factor of one hundred. If the caller stated a price that conflicts with what the AI said, record the AI figure, never the caller figure.
+
+"action" must be ONE short sentence describing what the human leasing agent should do next. Examples: "Send tour link via text", "Follow up tomorrow to confirm tour booking", "Add to waitlist for 2 bedroom", "No follow-up needed, caller declined", "Verify Section 8 voucher status before tour", "Confirm move-in date and start application". Never use a dash as punctuation in either field.
+
+If the call was clearly a wrong number, or the caller explicitly declined help, set summary to "OTHER: Brief call with no clear leasing intent" and action to "No follow-up needed".
+
+If the caller's only words were "message" or "leave a message" (or the Spanish equivalent) and the transcript shows the AI then asked for their name, callback number or message, summarize what was captured as category MESSAGE. If the caller never gave the message itself, say so ("MESSAGE: Unknown caller at NMFA asked to leave a message but did not say what it was."), and set action to "CALLBACK REQUESTED: call back to get the message".
+
+If the caller engaged at all but the call ended WITHOUT a captured name AND WITHOUT an established reason for calling (for example a one-word reply and then silence, or a dropped call after the greeting), do NOT use "No follow-up needed". Set action to "Unresolved, no information captured, call this number back" and state plainly in the summary that nothing was captured. A caller who reached us and got nothing is an open follow-up, not a closed call.
+
+If the caller asked for a person, asked for a manager or a named staff member, or left a message for the team, NEVER use "No follow-up needed". Set action to start with "CALLBACK REQUESTED:" followed by what the caller wants in a few words (for example "CALLBACK REQUESTED: asking whether their deposit was received"). Never put a dollar figure in this field that the caller did not say. If the caller gave a different callback number, say only that they gave a different callback number and that it is in the transcript; do not write the digits.
+
+CALLER ID: ${session.from && String(session.from).trim() && !/^unknown$/i.test(String(session.from).trim()) ? ('The lead row already has this caller\'s phone number from caller ID (' + session.from + '). NEVER write that no callback number was captured, that a callback number is missing, or that you do not have a number to call back. You may say the caller confirmed this number, or that they gave a different callback number if they did.') : 'No caller ID is on the row. Only then may you say that no callback number was captured.'}
+
+If this call is a maintenance or work-order call (including a broken refrigerator), start the action with "MAINTENANCE:" (or "MAINTENANCE EMERGENCY:" only for a true emergency). Record the name, unit if given, the issue, and that the callback number is the caller ID unless they gave a different one.
+
+Caller: ${callerName}
+Property: ${propertyName}
+
+TRANSCRIPT:
+${transcript}
+
+Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summary":"...","action":"..."}`;
+}
+
 async function generateCallSummary(session) {
   if (!session || !session.conversation) return { ai_summary: '', ai_action: '' };
 
@@ -2204,31 +2337,7 @@ async function generateCallSummary(session) {
   const callerName = extractCallerName(session) || 'Unknown caller';
   const propertyName = session.property?.short || 'property';
 
-  const prompt = `You are reviewing a voice call transcript for a leasing agent at Mattgab Management. Produce a JSON object with exactly two keys: "summary" and "action".
-
-"summary" must be 2 to 3 sentences. Cover: who called, what they wanted, what was discussed (price, tour, application, hours, etc.), and any commitment made (tour link sent, application link sent, callback expected). Be specific. Use the caller's name if known. Do not include filler.
-
-PRICES IN THE SUMMARY: the transcript contains prices spoken as words. Convert each to its correct dollar figure: "nine ninety five" is $995, "eleven hundred" is $1,100, "twelve ninety five" is $1,295, "fourteen hundred" is $1,400, "fifteen hundred" is $1,500, "sixteen hundred fifty" is $1,650, "seventeen fifty" is $1,750, "eighteen hundred" is $1,800, "one thousand" is $1,000. The same figures may appear spelled out in full ("one thousand, two hundred ninety five dollars"); treat those identically. NEVER write a monthly rent or deposit as a cents or decimal amount such as $12.95 or $17.50; those are wrong by a factor of one hundred. If the caller stated a price that conflicts with what the AI said, record the AI figure, never the caller figure.
-
-"action" must be ONE short sentence describing what the human leasing agent should do next. Examples: "Send tour link via text", "Follow up tomorrow to confirm tour booking", "Add to waitlist for 2 bedroom", "No follow-up needed — caller declined", "Verify Section 8 voucher status before tour", "Confirm move-in date and start application".
-
-If the call was clearly a wrong number, or the caller explicitly declined help, set summary to "Brief call with no clear leasing intent" and action to "No follow-up needed".
-
-If the caller engaged at all but the call ended WITHOUT a captured name AND WITHOUT an established reason for calling (for example a one-word reply and then silence, or a dropped call after the greeting), do NOT use "No follow-up needed". Set action to "Unresolved, no information captured, call this number back" and state plainly in the summary that nothing was captured. A caller who reached us and got nothing is an open follow-up, not a closed call.
-
-If the caller asked for a person, asked for a manager or a named staff member, or left a message for the team, NEVER use "No follow-up needed". Set action to start with "CALLBACK REQUESTED:" followed by what the caller wants in a few words (for example "CALLBACK REQUESTED: asking whether their deposit was received"). Never put a dollar figure in this field that the caller did not say. If the caller gave a different callback number, include it in the summary.
-
-CALLER ID: ${session.from && String(session.from).trim() && !/^unknown$/i.test(String(session.from).trim()) ? ('The lead row already has this caller\'s phone number from caller ID (' + session.from + '). NEVER write that no callback number was captured, that a callback number is missing, or that you do not have a number to call back. You may say the caller confirmed this number, or that they gave a different callback number if they did.') : 'No caller ID is on the row. Only then may you say that no callback number was captured.'}
-
-If this call is a maintenance or work-order call (including a broken refrigerator), start the action with "MAINTENANCE:" (or "MAINTENANCE EMERGENCY:" only for a true emergency). Record the name, unit if given, the issue, and that the callback number is the caller ID unless they gave a different one.
-
-Caller: ${callerName}
-Property: ${propertyName}
-
-TRANSCRIPT:
-${transcript}
-
-Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summary":"...","action":"..."}`;
+  const prompt = buildCallSummaryPrompt_(session, callerName, propertyName, transcript);
 
   try {
     const msg = await anthropic.messages.create({
@@ -2241,8 +2350,8 @@ Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summar
     const clean = raw.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
     const parsed = JSON.parse(clean);
     return {
-      ai_summary: sanitizeSummaryCallback(String(parsed.summary || '').trim().substring(0, 1000), session.from),
-      ai_action:  sanitizeSummaryCallback(String(parsed.action  || '').trim().substring(0, 240), session.from),
+      ai_summary: sanitizeSummaryCallback(cleanSummaryText_(parsed.summary).substring(0, 300), session.from),
+      ai_action:  sanitizeSummaryCallback(cleanSummaryText_(parsed.action).substring(0, 240), session.from),
     };
   } catch (err) {
     console.error('Call summary generation failed:', err.message);
