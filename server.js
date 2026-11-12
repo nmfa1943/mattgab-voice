@@ -2544,6 +2544,92 @@ function buildFactualReply(intent, property, isSpanish) {
 }
 
 // ============================================================
+// SPANISH VOICE (pass 13, 2026-11-11)
+// Until pass 12 the Spanish switch only sent {ttsLanguage, transcriptionLanguage: 'es-US'}, so Spanish was spoken
+// by the English voice (Lrd8QHYUxHOQgV6Kbgy4) with an English accent. Twilio's current ConversationRelay docs say a
+// language the session did not declare must be added WITH its settings in full (ttsProvider + voice, and
+// transcriptionProvider + speechModel) in the same `language` message, or the switch is rejected with
+// "TTS for 'es-US' is not configured" and the call stays on its current voice.
+// https://www.twilio.com/docs/voice/conversationrelay/dynamic-configuration
+// https://www.twilio.com/docs/voice/conversationrelay/websocket-messages
+// The English path (TwiML, voice, greeting) is untouched: the Spanish voice is only added at the moment the caller
+// switches to Spanish.
+// ============================================================
+// >>> SWAP THE SPANISH VOICE HERE (one constant). Candidates (see pass13/CHANGES.md for sources):
+//   22dcXdsgE2CBQsk9cnTY  Ximena  - Mexican Spanish, mature female, ElevenLabs default voice (Twilio support not yet verified)
+//   nbcvT3C2tyOd2OsRAtUf  Maya    - Latin American/Mexican Spanish, conversational / customer service (Twilio support not yet verified)
+//   uDhfdG2VwEjWZ4JYzggn  Amelia - Narrations - Twilio's documented default ElevenLabs voice for es-US (Twilio-verified)
+const SPANISH_VOICE_ID = '22dcXdsgE2CBQsk9cnTY';
+// Used only if Twilio rejects SPANISH_VOICE_ID during a call (Twilio's own documented es-US default voice).
+const SPANISH_VOICE_FALLBACK_ID = 'uDhfdG2VwEjWZ4JYzggn';
+// ElevenLabs model suffix for the voice string. '' = Twilio's default for non-en-US (Flash 2.5, same as today's voice).
+// Twilio recommends 'v4' (voice string "<id>-v4"); try it on staging by ear before changing this.
+const SPANISH_VOICE_MODEL = '';
+const SPANISH_TTS_LANGUAGE = 'es-US';
+const SPANISH_TTS_PROVIDER = 'ElevenLabs';
+const SPANISH_STT_PROVIDER = 'Deepgram';
+const SPANISH_STT_MODEL = 'nova-3-general';
+// false (default): Spanish is added over the WebSocket at the switch, so the English TwiML stays byte-identical.
+// true: also declare <Language code="es-US" .../> in the TwiML (Twilio's other documented way).
+const SPANISH_DECLARE_IN_TWIML = false;
+// A Twilio `error` message that arrives this soon after the switch, and that names the voice/language config,
+// is treated as "the Spanish voice was rejected" and the next fallback is sent.
+const SPANISH_VOICE_ERROR_WINDOW_MS = 15000;
+
+function spanishVoiceString_(id) {
+  return id + (SPANISH_VOICE_MODEL ? '-' + SPANISH_VOICE_MODEL : '');
+}
+
+// attempt 0: the Spanish voice; 1: Twilio's documented es-US default voice; 2: the pass 12 message (language only).
+function buildSpanishLanguageMessage_(attempt) {
+  if (attempt >= 2) {
+    return { type: 'language', ttsLanguage: SPANISH_TTS_LANGUAGE, transcriptionLanguage: SPANISH_TTS_LANGUAGE };
+  }
+  return {
+    type: 'language',
+    ttsLanguage: SPANISH_TTS_LANGUAGE,
+    transcriptionLanguage: SPANISH_TTS_LANGUAGE,
+    ttsProvider: SPANISH_TTS_PROVIDER,
+    voice: spanishVoiceString_(attempt === 1 ? SPANISH_VOICE_FALLBACK_ID : SPANISH_VOICE_ID),
+    transcriptionProvider: SPANISH_STT_PROVIDER,
+    speechModel: SPANISH_STT_MODEL
+  };
+}
+
+// Given a Twilio `error` message, returns the next language message to send, or null (no change).
+function nextSpanishVoiceFallback_(session, description, nowMs) {
+  if (!session || typeof session.spanishVoiceAttempt !== 'number' || session.spanishVoiceAttempt >= 2) return null;
+  if ((nowMs - session.spanishSwitchAt) > SPANISH_VOICE_ERROR_WINDOW_MS) return null;
+  if (!/not configured|invalid provider|voice|combination|64106|64107/i.test(String(description || ''))) return null;
+  session.spanishVoiceAttempt += 1;
+  return buildSpanishLanguageMessage_(session.spanishVoiceAttempt);
+}
+
+function spanishLanguageElement_() {
+  return `      <Language code="${SPANISH_TTS_LANGUAGE}" ttsProvider="${SPANISH_TTS_PROVIDER}" voice="${spanishVoiceString_(SPANISH_VOICE_ID)}" transcriptionProvider="${SPANISH_STT_PROVIDER}" speechModel="${SPANISH_STT_MODEL}" />\n`;
+}
+
+// The TwiML returned by POST /voice. With SPANISH_DECLARE_IN_TWIML=false this is byte-for-byte the pass 12 TwiML.
+function buildRelayTwiml_(host, greeting) {
+  const languageEl = SPANISH_DECLARE_IN_TWIML ? spanishLanguageElement_() : '';
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <ConversationRelay
+      url="wss://${host}/ws"
+      welcomeGreeting="${greeting}"
+      voice="Lrd8QHYUxHOQgV6Kbgy4"
+      ttsProvider="ElevenLabs"
+      language="en-US"
+      transcriptionLanguage="multi"
+      dtmfDetection="true"
+    >
+${languageEl}    </ConversationRelay>
+  </Connect>
+</Response>`;
+}
+
+// ============================================================
 // FASTIFY SERVER
 // ============================================================
 const fastify = Fastify({ logger: true });
@@ -2567,21 +2653,7 @@ fastify.post('/voice', async (request, reply) => {
   // testing on a staging URL.
   const host = request.headers.host || 'mattgab-voice-production.up.railway.app';
 
-  reply.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
-<Response>
-  <Connect>
-    <ConversationRelay
-      url="wss://${host}/ws"
-      welcomeGreeting="${greeting}"
-      voice="Lrd8QHYUxHOQgV6Kbgy4"
-      ttsProvider="ElevenLabs"
-      language="en-US"
-      transcriptionLanguage="multi"
-      dtmfDetection="true"
-    >
-    </ConversationRelay>
-  </Connect>
-</Response>`);
+  reply.type('text/xml').send(buildRelayTwiml_(host, greeting));
 });
 
 // WebSocket endpoint — handles the live conversation
@@ -2660,11 +2732,11 @@ fastify.register(async function(fastify) {
             session.isSpanish = true;
             session.languageSwitched = true;
             console.log(`Spanish detected — switching (matched: ${wordMatches.join(',')})`);
-            ws.send(JSON.stringify({
-              type: 'language',
-              ttsLanguage: 'es-US',
-              transcriptionLanguage: 'es-US'
-            }));
+            // Pass 13: switch with the native Spanish voice (full settings, see SPANISH VOICE above).
+            session.spanishVoiceAttempt = 0;
+            session.spanishSwitchAt = Date.now();
+            ws.send(JSON.stringify(buildSpanishLanguageMessage_(0)));
+            console.log(`Spanish voice requested: ${spanishVoiceString_(SPANISH_VOICE_ID)} (${SPANISH_TTS_LANGUAGE})`);
           }
 
           // CONSENT LATCH (2026-10-15). If this caller turn is an explicit yes
@@ -2811,6 +2883,18 @@ fastify.register(async function(fastify) {
               ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
               : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
             ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+          }
+          break;
+        }
+
+        case 'error': {
+          // Twilio reports a rejected config as {type:'error', description}. Log it (no secrets in it) and, if it
+          // follows the Spanish voice switch, fall back one step: Twilio's default es-US voice, then the pass 12 message.
+          console.error(`ConversationRelay error: ${msg.description}`);
+          const fallbackMsg = nextSpanishVoiceFallback_(sessions.get(ws.callSid), msg.description, Date.now());
+          if (fallbackMsg) {
+            console.error(`Spanish voice rejected - falling back (attempt ${sessions.get(ws.callSid).spanishVoiceAttempt}): ${fallbackMsg.voice || 'language only'}`);
+            ws.send(JSON.stringify(fallbackMsg));
           }
           break;
         }
