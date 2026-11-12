@@ -875,6 +875,9 @@ const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los
 // that a reduction exists.
 const NO_SPECIAL_REPLY_EN = 'Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour.';
 const NO_SPECIAL_REPLY_ES = 'El precio depende de la aprobación de su solicitud, y nuestro equipo de arrendamiento le explicará todos los términos cuando venga a la visita.';
+// Pass 14: the one approved rent-due / late-fee answer (Jenea, 2026-11-11 9:41 PM AZ). Spanish is formal usted with every number spelled as a word.
+const RENT_DUE_REPLY_EN = 'Rent is due on the 1st. After the 5-day grace period, a $50 late fee applies.';
+const RENT_DUE_REPLY_ES = 'La renta vence el día primero de cada mes. Después del período de gracia de cinco días, se aplica un cargo por pago tardío de cincuenta dólares.';
 
 // The MOVE-IN COST body of the system prompt. Quotes store figures when the
 // store has them and the content is live; otherwise (fallback mode, or no
@@ -1784,6 +1787,12 @@ CONDITIONS:
 - A question about the PRICE of a unit, or about the regular or comparison price, or the price together with the deposit, is NOT a conditions question: give the listed price(s) (both 2-bedroom lease options together, and the deposit / move-in figures if asked) and never answer with the approval sentence alone.
 - PRECEDENCE for "is that a special?": if the caller asks whether the six-month price, the twelve-month price or either lease option is a special, a promotion or a deal, answer FIRST with "It is simply one of our two lease options" and THEN add the approval sentence above. This wins over the general conditions line. For any other special / catch / conditions question use the approval sentence alone.
 - Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
+
+RENT DUE DATE AND LATE FEE:
+- If a caller (resident or prospect) asks when rent is due, about the rent due date, a late fee, the grace period, or what happens if rent is paid late, answer with EXACTLY this and nothing more:
+  - English: "${RENT_DUE_REPLY_EN}"
+  - Spanish: "${RENT_DUE_REPLY_ES}"
+- Say it as written. Do NOT add a posting day, any other fee amount, partial-payment rules, payment methods, or any exception. If the caller asks anything beyond that wording, say our leasing team can go over it, and offer to have the office follow up. Never promise to waive a fee.
 
 PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - The AI agent does NOT quote specials, discounts or move-in offers. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, do NOT hint that one exists or might exist. Give the listed price and say: English: "${NO_SPECIAL_REPLY_EN}" Spanish: "${NO_SPECIAL_REPLY_ES}" NEVER state a dollar amount for any reduction, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, and any monthly rate lower than the ones in the pricing block. Move-in totals are quoted only as set out in the MOVE-IN COST rule.
