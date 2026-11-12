@@ -47,6 +47,115 @@ const TWO_BR_STATIC_LINE_ = TWO_BR_LEAD_TERM === 6
   : TWO_BR_12_STATIC_ + ', or ' + TWO_BR_6_STATIC_;
 
 // ============================================================
+// OFFICE HOURS — one constant per property, then hoursFor()
+// ------------------------------------------------------------
+// Official hours live here only. hoursFor() always returns these values when
+// they are set, so store hours from CONTENT_URL cannot override them.
+// en / es are the spoken wording (words, not digits). enWritten / esWritten
+// are for any SMS or other written path; current SMS templates do not include
+// hours, but written callers should use hoursFor(..., { written: true }).
+// ============================================================
+const OFFICE_HOURS = {
+  nmf: {
+    // Source: Jenea, 2:12 PM MST Nov 12, 2026: "Yes, NMF is Mon-Fri 9-5,
+    // 5-6 by appointment, Saturday by appointment, Sunday closed. Use those everywhere."
+    en: "Our office is open Monday through Friday, nine A M to five P M, with appointments available from five to six P M. Saturdays are by appointment, and we're closed on Sundays.",
+    es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, con citas disponibles de cinco a seis de la tarde. Los sábados son con cita previa y los domingos está cerrada.',
+    enWritten: 'Mon–Fri 9 AM–5 PM, appointments 5–6 PM; Saturday by appointment; Sunday closed',
+    esWritten: 'Lun–vie 9 AM–5 PM, citas de 5–6 PM; sábados con cita previa; domingo cerrado'
+  },
+  windsong: {
+    // Source: Kiko, 2:12 PM MST Nov 12, 2026 — pending confirmation.
+    // These WindSong hours did not come from Jenea's quote.
+    en: 'Monday through Friday, nine A M to five P M, Saturday ten A M to three P M, closed Sunday.',
+    es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, y los sábados de diez de la mañana a tres de la tarde. Los domingos está cerrada.',
+    enWritten: 'Mon–Fri 9 AM–5 PM, Saturday 10 AM–3 PM, Sunday closed',
+    esWritten: 'Lun–vie 9 AM–5 PM, sábado 10 AM–3 PM, domingo cerrado'
+  }
+};
+
+function hoursPropertyKey_(property) {
+  if (property == null || property === '') return null;
+  if (typeof property === 'object') {
+    return hoursPropertyKey_(property.key || property.short || property.name || property.ai_number || property.id || '');
+  }
+  const raw = String(property).trim();
+  const compact = raw.toLowerCase().replace(/[\s_-]+/g, '');
+  if (compact === 'nmf' || compact === 'nmfa' || compact === 'northmountainfoothills' || compact === 'northmountainfoothillsapartments') return 'nmf';
+  if (compact === 'windsong' || compact === 'windsongapartments') return 'windsong';
+  const digits = raw.replace(/\D/g, '');
+  if (digits === '15206006936' || digits === '5206006936') return 'nmf';
+  if (digits === '15208000759' || digits === '5208000759') return 'windsong';
+  if (compact.includes('windsong')) return 'windsong';
+  if (compact.includes('northmountain') || compact.includes('nmfa') || compact === 'nmf') return 'nmf';
+  return null;
+}
+
+function hoursFor(property, lang, opts) {
+  opts = opts || {};
+  lang = (lang === 'es') ? 'es' : 'en';
+  const key = hoursPropertyKey_(property);
+  const block = (key && OFFICE_HOURS[key]) || null;
+  if (!block) return '';
+  const written = (opts.written === true || opts.channel === 'written');
+  const official = written
+    ? ((lang === 'es') ? block.esWritten : block.enWritten)
+    : block[lang];
+  // Official wording always wins. The live store cannot override it with
+  // a conflicting hours string.
+  if (official != null && String(official).trim() !== '') {
+    return String(official).trim();
+  }
+  const storeRaw = (opts.store != null) ? opts.store : opts.storeHours;
+  const storeText = (storeRaw != null && String(storeRaw).trim() !== '') ? String(storeRaw).trim() : '';
+  if (storeText && opts.usingFallback === false) return storeText;
+  return '';
+}
+
+
+function hoursAlreadyPhrased_(hours, lang) {
+  const s = String(hours || '').trim();
+  if (!s) return false;
+  if (lang === 'es') {
+    return /^(el horario de(?: la oficina)? es|nuestro horario(?: de oficina)? es|nuestra oficina est[aá] abierta)\b/i.test(s);
+  }
+  return /^(our office hours are|our hours are|our office is open|the office (?:hours are|is open))\b/i.test(s);
+}
+
+function punctuateHours_(hours) {
+  const s = String(hours || '').trim();
+  if (!s) return '';
+  return /[.!?…]$/.test(s) ? s : s + '.';
+}
+
+// Idempotent hours sentence. If the canonical string is already a complete
+// statement, return it as-is. Otherwise wrap it once.
+function formatHoursStatement_(hours, lang) {
+  const s = String(hours || '').trim();
+  if (!s) return '';
+  if (hoursAlreadyPhrased_(s, lang)) return punctuateHours_(s);
+  const body = s.replace(/[.]+$/, '');
+  if (lang === 'es') return 'El horario de la oficina es ' + body + '.';
+  return 'Our office hours are ' + body + '.';
+}
+
+function bindOfficeHoursGetters_(obj, key, enName, esName) {
+  if (!obj) return;
+  delete obj[enName];
+  delete obj[esName];
+  Object.defineProperty(obj, enName, {
+    enumerable: true,
+    configurable: true,
+    get() { return hoursFor(key, 'en'); }
+  });
+  Object.defineProperty(obj, esName, {
+    enumerable: true,
+    configurable: true,
+    get() { return hoursFor(key, 'es'); }
+  });
+}
+
+// ============================================================
 // PROPERTY DATA — sourced from chat widget prompt (class-chat-widget.php)
 // ============================================================
 const PROPERTIES = {
@@ -58,16 +167,15 @@ const PROPERTIES = {
     area: 'North Phoenix',
     phone: '602-997-2928 extension 1',
     ai_number: '520-600-6936',
-    hours: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
-    hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
+    // hours / hours_es bound from OFFICE_HOURS after DEFAULT_CONTENT is declared
     tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. AVAILABLE NOW.
-1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included. AVAILABLE NOW.
-3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.`,
-    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Mattgab Management. ¿En qué le puedo ayudar hoy?"
+2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. Let me have the office confirm current availability for you.
+1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included. Let me have the office confirm current availability for you.
+3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). Let me have the office confirm current availability for you.`,
+    greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Matt Gab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Matt Gab Management. ¿Cómo puedo ayudarle hoy?"
   },
   '+15208000759': {
     key: 'windsong',
@@ -77,8 +185,7 @@ const PROPERTIES = {
     area: 'East Phoenix',
     phone: '602-997-2928 extension 2',
     ai_number: '520-800-0759',
-    hours: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
-    hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
+    // hours / hours_es bound from OFFICE_HOURS after DEFAULT_CONTENT is declared
     tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
     // APPLICATION LINK. This was locations=4 from 2026-07-16 until 2026-10-12,
     // and locations=4 is not a Windsong application - it is a Rent Manager
@@ -94,11 +201,11 @@ const PROPERTIES = {
     // not by confirming that a text arrived.
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). AVAILABLE NOW.
-1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now.
-3 bedroom: one thousand, eight hundred dollars a month, all utilities included (electric, water, sewer, and trash) — NOT available right now.`,
-    greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Mattgab Management. Para español, diga hola. How can I help you today?",
-    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Mattgab Management. ¿En qué le puedo ayudar hoy?"
+2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). Let me have the office confirm current availability for you.
+1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.
+3 bedroom: one thousand, eight hundred dollars a month, all utilities included (electric, water, sewer, and trash) — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.`,
+    greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Matt Gab Management. Para español, diga hola. How can I help you today?",
+    greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Matt Gab Management. ¿Cómo puedo ayudarle hoy?"
   }
 };
 
@@ -130,9 +237,8 @@ const DEFAULT_CONTENT = {
   obsolete_figures_pronunciation_extra: ['twelve hundred ninety five'],
   properties: {
     nmfa: {
-      hours_en: 'Monday through Friday, 9 AM to 6 PM, and Saturday 10 AM to 4 PM',
-      hours_es: 'lunes a viernes de 9 AM a 6 PM, y sábado de 10 AM a 4 PM',
-      units_note: 'NOTE: North Mountain Foothills has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Right now 1-bedroom, 2-bedroom AND 3-bedroom units are ALL AVAILABLE. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY, at one flat rate with no 6-month option. The 2-bedroom has a 12-month rate and a 6-month rate.',
+      // hours_en / hours_es bound from OFFICE_HOURS below
+      units_note: 'NOTE: North Mountain Foothills has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Availability is confirmed by the office. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY, at one flat rate with no 6-month option. The 2-bedroom has a 12-month rate and a 6-month rate.',
       unit_types: {
         '1br': {
           status: 'available', quotable: true,
@@ -154,14 +260,15 @@ const DEFAULT_CONTENT = {
       }
     },
     windsong: {
-      hours_en: 'Monday through Friday, 9 AM to 5 PM, and Saturday 10 AM to 3 PM',
-      hours_es: 'lunes a viernes de 9 AM a 5 PM, y sábado de 10 AM a 3 PM',
-      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Right now 2-bedrooms are AVAILABLE; 1-bedrooms and 3-bedrooms are not available. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY when offered. The 2-bedroom has a 12-month rate and a 6-month rate.',
+      // hours_en / hours_es bound from OFFICE_HOURS below
+      units_note: 'NOTE: Windsong has 1-bedroom, 2-bedroom, and 3-bedroom units (studios exist but are not available). Availability of the 2-bedroom is confirmed by the office. The 1-bedroom and the 3-bedroom are quotable but not available: quote the price, then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list. The 1-bedroom AND the 3-bedroom are 12-MONTH ONLY when offered. The 2-bedroom has a 12-month rate and a 6-month rate.',
       unit_types: {
         '1br': {
-          status: 'not_available', quotable: false,
+          status: 'not_available', quotable: true,
           utils_spoken: 'one thousand, three hundred dollars', utils_num: 1300,
-          std12_utils_spoken: 'one thousand, three hundred dollars', std12_utils_num: 1300
+          std12_utils_spoken: 'one thousand, three hundred dollars', std12_utils_num: 1300,
+          coming_available_en: 'Coming available soon. I can connect you with our office or add you to our waiting list.',
+          coming_available_es: 'Estará disponible pronto. Puedo ponerle en contacto con nuestra oficina o agregarle a nuestra lista de espera.'
         },
         '2br': {
           status: 'available', quotable: true,
@@ -169,15 +276,25 @@ const DEFAULT_CONTENT = {
           std12_utils_spoken: 'one thousand, five hundred dollars', std12_utils_num: 1500
         },
         '3br': {
-          status: 'not_available', quotable: false,
+          status: 'not_available', quotable: true,
           utils_spoken: 'one thousand, eight hundred dollars', utils_num: 1800,
-          std12_utils_spoken: 'one thousand, eight hundred dollars', std12_utils_num: 1800
+          std12_utils_spoken: 'one thousand, eight hundred dollars', std12_utils_num: 1800,
+          coming_available_en: 'Coming available soon. I can connect you with our office or add you to our waiting list.',
+          coming_available_es: 'Estará disponible pronto. Puedo ponerle en contacto con nuestra oficina o agregarle a nuestra lista de espera.'
         },
         'studio': { status: 'not_available', quotable: false }
       }
     }
   }
 };
+
+
+// Bind hours getters after both PROPERTIES and DEFAULT_CONTENT exist so
+// official OFFICE_HOURS values are picked up everywhere (spoken form).
+bindOfficeHoursGetters_(PROPERTIES['+15206006936'], 'nmf', 'hours', 'hours_es');
+bindOfficeHoursGetters_(PROPERTIES['+15208000759'], 'windsong', 'hours', 'hours_es');
+bindOfficeHoursGetters_(DEFAULT_CONTENT.properties.nmfa, 'nmf', 'hours_en', 'hours_es');
+bindOfficeHoursGetters_(DEFAULT_CONTENT.properties.windsong, 'windsong', 'hours_en', 'hours_es');
 
 let CONTENT_CACHE = DEFAULT_CONTENT; // last-known-good; starts as the safe baseline
 let CONTENT_TS    = 0;
@@ -261,6 +378,13 @@ const OPEN_QUESTION_EN = 'Can you tell me in a few words what you are calling ab
 const OPEN_QUESTION_ES = '¿Puede decirme en pocas palabras el motivo de su llamada?';
 const YANELIA_MESSAGE_EN = 'Happy to take a message for Yanelia. Can I get your name and what you would like me to tell her?';
 const YANELIA_MESSAGE_ES = 'Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?';
+// v47: callers who ask for Stephany (or an alias) are routed by need.
+// Leasing and resident questions: take a message for Viola.
+// Maintenance: take a message for Jose. Emergencies stay on ext 3.
+const VIOLA_MESSAGE_EN = 'I can take a message for Viola. Can I get your name and what you would like me to tell her?';
+const VIOLA_MESSAGE_ES = 'Con gusto le tomo el mensaje para Viola. ¿Me puede dar su nombre y qué desea que le diga?';
+const JOSE_MESSAGE_EN = 'I can take a message for Jose. Can I get your name and what you would like me to tell him?';
+const JOSE_MESSAGE_ES = 'Con gusto le tomo el mensaje para Jose. ¿Me puede dar su nombre y qué desea que le diga?';
 // Pass 5 (2026-11-11): the Spanish maintenance script used to take the message
 // but never gave the Maintenance extension, and the per-turn hint told the model
 // to copy it, so Spanish non-emergency callers never heard extension 3.
@@ -292,7 +416,7 @@ function callerAskedWhoYouAre(conversation) {
 
 function stripTimeOfDayGreetingOnly_(text) {
   // Only strip a leading time-of-day greeting when it is a standalone
-  // opening (punctuation or end), so "Good morning hours are 9 to 5"
+  // opening (punctuation or end), so "Good morning our hours start now"
   // is left intact.
   return String(text || '').replace(
     /^\s*(good\s+(morning|afternoon|evening|day)|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches)(?:\s*[,!.]+|\s*$)\s*/i,
@@ -438,9 +562,9 @@ function sanitizeHoursInReply(text, property, opts) {
   const spanishWithoutStore = !!(opts.isSpanish || anySpanishHoursHit) && !(property && property.hours_es);
   let canon = '';
   if (useSpanish) {
-    canon = `Nuestro horario de oficina es ${property.hours_es}.`;
+    canon = formatHoursStatement_(property.hours_es, 'es');
   } else if (!spanishWithoutStore && property && property.hours) {
-    canon = `Our office hours are ${property.hours}.`;
+    canon = formatHoursStatement_(property.hours, 'en');
   }
   const kept = [];
   let replaced = false;
@@ -518,7 +642,10 @@ const STAFF_ALIASES = {
 };
 
 // Names no longer on the call tree but still recognized so we can give the
-// departure message instead of inventing a route. Not used for extensions.
+// departure message (Felipa) or take a message for Viola or Jose (Stephany,
+// routed by the caller's need) instead of inventing a route. Not used for
+// extensions. Aliases stay internal so speech-to-text variants are recognized;
+// they are not spoken to callers.
 const STAFF_DEPARTED_ALIASES = {
   felipa: 'felipa', salipa: 'felipa', filipa: 'felipa', felipe: 'felipa', falipa: 'felipa', philippa: 'felipa', phylipa: 'felipa',
   stephany: 'stephany', stephanie: 'stephany', stefanie: 'stephany', estefani: 'stephany', estefany: 'stephany', tiffany: 'stephany'
@@ -551,6 +678,34 @@ function staffHasKnownExtension(canonical) {
   // Known call-tree extensions only. Do not invent one for Yanelia.
   const map = { viola: '1', brian: '1', angel: '2', jose: '3' };
   return map[canonical] || '';
+}
+
+function normalizeStaffHeard_(heard) {
+  return String(heard || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[.,!?¿¡]+$/g, '');
+}
+
+function canonicalDepartedStaffName(heard) {
+  const t = normalizeStaffHeard_(heard);
+  if (!t) return '';
+  if (STAFF_DEPARTED_ALIASES[t]) return STAFF_DEPARTED_ALIASES[t];
+  return '';
+}
+
+function mentionsStephanyAlias_(text) {
+  return /\b(?:stephany|stephanie|stefanie|estefani|estefany|tiffany)\b/i.test(String(text || ''));
+}
+
+function departedStaffMessageTarget_(conversation) {
+  // Maintenance (and emergencies, which also classify as maintenance calls)
+  // go to Jose. Leasing, resident, and unspecified needs go to Viola.
+  if (isMaintenanceCall(conversation || [], { recentUserTurns: 3 })) return 'jose';
+  return 'viola';
+}
+
+function departedStaffMessage_(isSpanish, target) {
+  const who = target === 'jose' ? 'jose' : 'viola';
+  if (who === 'jose') return isSpanish ? JOSE_MESSAGE_ES : JOSE_MESSAGE_EN;
+  return isSpanish ? VIOLA_MESSAGE_ES : VIOLA_MESSAGE_EN;
 }
 
 function normalizeForMatch_(text) {
@@ -737,6 +892,23 @@ function buildTurnSystemHints(conversation, opts) {
       suffix += '\n\nTHIS TURN ONLY: the caller is asking the 2 bedroom price' + (q10.market ? ' and what the market or regular price is' : '') + '. Do NOT answer with the approval sentence. Say both lease options in one sentence, in this order: "' + p10.price + '"' + (q10.market ? ' Then say plainly: "' + p10.current + '" Never mention any other figure or a higher price.' : '') + (q10.deposit && p10.deposit ? ' The caller also asked about the deposit / move-in cost, so then say: "' + p10.deposit + '"' : '') + (opts.isSpanish ? ' Say every number in Spanish or digits, never English number words.' : '');
     }
   }
+  {
+    const lastUser = recentUserTurns_(conversation, 1).join(' ');
+    if (mentionsStephanyAlias_(lastUser)) {
+      if (recentEmergency) {
+        suffix += '\n\nTHIS TURN ONLY: the caller asked for Stephany or a speech-to-text alias of that name. She no longer works here. Do not say the name and do not say why she left. This is a maintenance EMERGENCY: keep the existing Maintenance line, extension three, first. After giving that line, you may offer to take a message for Jose.';
+      } else {
+        const target = departedStaffMessageTarget_(conversation);
+        const msg = departedStaffMessage_(!!opts.isSpanish, target);
+        const who = target === 'jose' ? 'Jose' : 'Viola';
+        suffix += '\n\nTHIS TURN ONLY: the caller asked for Stephany or a speech-to-text alias of that name. She no longer works here. Do not say the name, do not say why she left, and do not give her personal hours. ' +
+          (target === 'jose'
+            ? 'This is a maintenance call, so take a message for Jose.'
+            : 'This is a leasing or resident question, so take a message for Viola.') +
+          ' Say: "' + msg + '" Then, one question per turn, ask what they want to tell ' + who + ' if they have not already said it, and confirm that the number they are calling from is the best callback number.';
+      }
+    }
+  }
   if (opts.isSpanish) {
     suffix += '\n\nTHIS TURN ONLY: this call has been conducted in Spanish. Whenever you speak Spanish, speak ONLY formal usted: use usted, le, su, and verbs in the usted form (puede, quiere, desea, llame, escriba). Never use the tú forms tú, te, ti, tu, tus, contigo, puedes, quieres, tienes, llama, escribe.';
   }
@@ -891,7 +1063,7 @@ function moveInCostLines_(key, content) {
 }
 
 const MOVE_IN_DEFLECT_EN = 'Your move-in cost depends on your application and lease terms, so our leasing team will give you the exact numbers at the tour. The monthly price already includes all your utilities. Want me to text you the tour link?';
-const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los términos del contrato, así que nuestro equipo le dará los números exactos en la visita. El precio mensual ya incluye todas sus utilidades. ¿Quiere que le envíe el enlace de la cita por texto?';
+const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los términos del contrato, así que nuestro equipo le dará los números exactos en la visita. El precio mensual ya incluye todos los servicios. ¿Quiere que le envíe el enlace para reservar un recorrido por texto?';
 
 // Pass 6: what the agent says when a caller asks about a special, discount or
 // move-in offer. Same sentence the CONDITIONS rule already uses; it never hints
@@ -1006,7 +1178,7 @@ function stripGoodFaithWording_(text, opts) {
   return replyIsSpanish_(t, opts.isSpanish) ? NO_SPECIAL_REPLY_ES : NO_SPECIAL_REPLY_EN;
 }
 
-// 2) The market rent (store market_num, $1,700) is NEVER spoken by the phone agent, and
+// 2) The market rent (store market_num, $1,700 or $1,900) is NEVER spoken by the phone agent, and
 //    no price is ever described as "regularly" / "normally" something else, or as a
 //    special / promo / limited-time / "for now" price.
 function numberWordsEn_(n) {
@@ -1030,6 +1202,14 @@ function moneyFormsRegex_(n) {
     if (hh < 100 && hh <= 99) words.push(numberWordsEn_(hh) + (tail ? ' ' + (tail < 10 ? 'oh ' : '') + numberWordsEn_(tail) : ' hundred')); // seventeen fifty
   }
   words.push(numberWordsEn_(th) + ' thousand' + (hu ? ' ' + numberWordsEn_(hu) + ' hundred' : '') + (tail ? ' ' + (hu ? 'and ' : '') + numberWordsEn_(tail) : ''));
+  if (th === 1 && hu && !tail) words.push('one thousand and ' + numberWordsEn_(hu) + ' hundred');
+  // Spanish spoken forms, e.g. "mil setecientos" / "mil novecientos".
+  const esHund = ['', 'ciento', 'doscientos', 'trescientos', 'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos'];
+  if (th === 1) {
+    if (rest === 0) words.push('mil');
+    else if (rest === 100) words.push('mil cien');
+    else if (!tail && hu) words.push('mil ' + (hu === 1 ? 'cien' : esHund[hu]));
+  }
   const parts = forms.map(f => '\\$?\\s?' + f.replace(/,/g, ',?') + '(?!\\d)').concat(words.filter(w => w.indexOf('  ') === -1 && !/undefined/.test(w)).map(w => '\\b' + reSp(w) + '\\b'));
   return parts.join('|');
 }
@@ -1046,7 +1226,8 @@ function marketRentRegex_(content) {
       if (typeof u.market_num === 'number') figs.add(u.market_num);
     }
   }
-  figs.add(1700); // the store's current market figure, kept hard even if the store drops it
+  figs.add(1700); // kept hard even if the store drops it
+  figs.add(1900); // PRICING.md also bans $1,900; must work in fallback with no market_num
   const srcs = [];
   for (const f of figs) { if (skip.has(f)) continue; const r = moneyFormsRegex_(f); if (r) srcs.push(r); }
   return srcs.length ? new RegExp('(?:' + srcs.join('|') + ')', 'i') : /$^/;
@@ -1155,7 +1336,7 @@ function twoBrPriceParts_(content, propKey, isSpanish) {
   if (isSpanish) {
     const es = twoTermPriceTextEs_(ut);
     if (!es) return null;
-    price = 'El apartamento de dos recámaras cuesta ' + es + ', con todos los servicios incluidos.';
+    price = 'El departamento de dos recámaras cuesta ' + es + ', con todos los servicios incluidos.';
   } else {
     price = 'The two bedroom is ' + twoTermPriceText_(ut, '') + ', all utilities included.';
   }
@@ -1164,7 +1345,7 @@ function twoBrPriceParts_(content, propKey, isSpanish) {
     ut: ut,
     price: price,
     current: isSpanish ? 'Esos son nuestros precios actuales.' : 'Those are our current prices.',
-    tour: isSpanish ? '¿Desea que le envíe el enlace de la cita por texto?' : 'Want me to text you the tour link so you can come see it?',
+    tour: isSpanish ? '¿Desea que le envíe el enlace para reservar un recorrido por texto?' : 'Want me to text you the tour link so you can come see it?',
     deposit: dep ? (isSpanish ? dep.es : dep.en) : '',
     depositSix: dep ? (isSpanish ? dep.sixEs : dep.sixEn) : ''
   };
@@ -1360,7 +1541,7 @@ function p11SpanishSentenceToWords_(sn) {
   // protect links / e-mail addresses (never spoken, never converted)
   const keep = [];
   s = s.replace(/(?:https?:\/\/|www\.)\S+|\S+@\S+\.\S+/gi, m => { keep.push(m); return '\u0001' + String(keep.length - 1).replace(/\d/g, d => 'abcdefghij'[d]) + '\u0002'; });
-  // times: "9 AM", "6 PM", "9:30 a.m."
+  // times: "8 AM", "7 PM", "8:30 a.m."
   s = s.replace(/\b(\d{1,2})(?::(\d{2}))?\s*([ap])(?:\.\s?m\.|m\b)/gi, (m, hh, mm, ap, off, whole) => {
     const h = Number(hh), min = mm ? Number(mm) : 0;
     if (h < 1 || h > 12 || min > 59) return m;
@@ -1441,18 +1622,55 @@ function stripMarkdownForSpeech_(text) {
   }
 }
 
+// v40: speech-only pronunciation. Written channels (lead payload, summary JSON,
+// transcript email, SMS, dashboard) must never call this. URLs and email
+// addresses are held aside first so a domain like mattgabmanagement.com, or an
+// address, is never split. Then a whole-word "Mattgab" becomes "Matt Gab".
+function speakMattgab_(text) {
+  const orig = String(text == null ? '' : text);
+  try {
+    const keep = [];
+    let s = orig.replace(/(?:https?:\/\/|www\.)\S+|\S+@\S+\.\S+/gi, (m) => {
+      keep.push(m);
+      return '\u0001' + String(keep.length - 1).replace(/\d/g, (d) => 'abcdefghij'[d]) + '\u0002';
+    });
+    s = s.replace(/\bMattgab\b/gi, 'Matt Gab');
+    s = s.replace(/\u0001([a-j]+)\u0002/g, (m, i) => keep[Number(i.replace(/[a-j]/g, (c) => 'abcdefghij'.indexOf(c)))]);
+    return s;
+  } catch (e) {
+    return orig;
+  }
+}
+
+// Flush-level helper for streamed model tokens. Leo already buffers the full
+// turn before any text is sent to ConversationRelay (see stream.on('text') and
+// finalMessage), then runs polishAssistantReply (intro-strip) and only then
+// speakableReply_. Filtering at flush/full-turn time is the safe choice: a
+// split "Matt" + "gab" across chunks is joined before the word-boundary
+// replace, and the intro-strip regex still sees "mattgab" as one word. Do not
+// filter each chunk on its own.
+function speakMattgabFromChunks_(chunks) {
+  return speakMattgab_(Array.isArray(chunks) ? chunks.join('') : String(chunks == null ? '' : chunks));
+}
+
 // What actually goes to the voice. Spanish sentences get number words; English sentences are untouched. The language is
 // picked per sentence from its own words, falling back to the whole reply, then to the session flag. Never throws.
+// v40: after number-word conversion, apply the speech-only Mattgab pronunciation filter.
 function speakableReply_(text, isSpanish) {
   try {
     const t = stripMarkdownForSpeech_(text);   // D-20261112-22: never speak markdown
-    if (!/\d/.test(t)) return t;
-    const whole = replyIsSpanish_(t, !!isSpanish);
-    // split on sentence ends, but not after an abbreviation that is followed by its number ("ext. 3", "a.m.")
-    const sents = t.split(/(?<=[.!?])(?<!\bext\.)(?<!\bapto?\.)(?<!\bnum\.)(?<!\ba\.m\.)(?<!\bp\.m\.)\s+/i).map(x => x.trim()).filter(Boolean);
-    return sents.map(sn => (/\d/.test(sn) && replyIsSpanish_(sn, whole)) ? p11SpanishSentenceToWords_(sn) : sn).join(' ');
+    let voiced;
+    if (!/\d/.test(t)) {
+      voiced = t;
+    } else {
+      const whole = replyIsSpanish_(t, !!isSpanish);
+      // split on sentence ends, but not after an abbreviation that is followed by its number ("ext. 3", "a.m.")
+      const sents = t.split(/(?<=[.!?])(?<!\bext\.)(?<!\bapto?\.)(?<!\bnum\.)(?<!\ba\.m\.)(?<!\bp\.m\.)\s+/i).map(x => x.trim()).filter(Boolean);
+      voiced = sents.map(sn => (/\d/.test(sn) && replyIsSpanish_(sn, whole)) ? p11SpanishSentenceToWords_(sn) : sn).join(' ');
+    }
+    return speakMattgab_(voiced);
   } catch (e) {
-    return String(text == null ? '' : text);
+    try { return speakMattgab_(String(text == null ? '' : text)); } catch (e2) { return String(text == null ? '' : text); }
   }
 }
 
@@ -1557,23 +1775,38 @@ function runPromptPipeline(session, userText, modelText, opts) {
   session.conversation = session.conversation || [];
   session.replyCommitted = false;
   session.conversation.push({ role: 'user', content: userText });
+  const intercepted = interceptAfterUserTurn_(session, { nowMs: opts.nowMs });
+  if (intercepted) {
+    return { spoken: intercepted.spoken, intercepted: intercepted.intercepted, hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: !!intercepted.hungUp, leadSnapshot: intercepted.leadSnapshot || null };
+  }
   const factualIntent = detectFactualIntent(userText);
   if (factualIntent && !opts.skipFactual) {
     const reply = buildFactualReply(factualIntent, session.property, session.isSpanish);
     if (reply) {
-      const spoken = neverEmptyReply(reply, { isSpanish: session.isSpanish });
+      const guarded = applyLeoRepeatGuard_(session, reply, opts.nowMs);
+      if (guarded.hangUp) {
+        const ended = finishLoopGuardHangup_(session, guarded.step || 'C', guarded.reply, opts.nowMs);
+        return { spoken: ended.spoken, intercepted: ended.intercepted, hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: true, leadSnapshot: ended.leadSnapshot };
+      }
+      const spoken = neverEmptyReply(maybePrependSoftCap_(session, guarded.reply, opts.nowMs), { isSpanish: session.isSpanish });
       session.conversation.push({ role: 'assistant', content: spoken });
       session.replyCommitted = true;
-      return { spoken: spoken, intercepted: factualIntent, hints: '', aborted: false, bargeIn: null, preAbort: preAbort };
+      return { spoken: spoken, intercepted: factualIntent, hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: false };
     }
   }
   const hints = buildTurnSystemHints(session.conversation, { isSpanish: !!session.isSpanish, property: session.property });
   if (opts.abortBeforeSend) {
     const outcome = handleBargeIn(session, modelText, { isSpanish: session.isSpanish });
-    return { spoken: '', intercepted: null, hints: hints, aborted: true, bargeIn: outcome, preAbort: preAbort };
+    return { spoken: '', intercepted: null, hints: hints, aborted: true, bargeIn: outcome, preAbort: preAbort, hungUp: false };
   }
+  const guardedModel = applyLeoRepeatGuard_(session, modelText, opts.nowMs);
+  if (guardedModel.hangUp) {
+    const ended = finishLoopGuardHangup_(session, guardedModel.step || 'C', guardedModel.reply, opts.nowMs);
+    return { spoken: ended.spoken, intercepted: ended.intercepted, hints: hints, aborted: false, bargeIn: null, preAbort: preAbort, hungUp: true, leadSnapshot: ended.leadSnapshot };
+  }
+  const modelOut = maybePrependSoftCap_(session, guardedModel.reply, opts.nowMs);
   const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
-  const spoken = commitAssistantReply(session, modelText, {
+  const spoken = commitAssistantReply(session, modelOut, {
     property: session.property,
     isFirstAssistantTurn: isFirstAssistantTurn,
     alreadyIntroduced: true,
@@ -1583,7 +1816,7 @@ function runPromptPipeline(session, userText, modelText, opts) {
   if (opts.abortAfterSend) {
     handleBargeIn(session, modelText, { isSpanish: session.isSpanish });
   }
-  return { spoken: spoken, intercepted: null, hints: hints, aborted: false, bargeIn: opts.abortAfterSend ? 'marked' : null, preAbort: preAbort };
+  return { spoken: spoken, intercepted: guardedModel.replaced ? ('loop_guard_' + (guardedModel.step || 'B')) : null, hints: hints, aborted: false, bargeIn: opts.abortAfterSend ? 'marked' : null, preAbort: preAbort, hungUp: false };
 }
 
 // Fetch the content record, cache it, and NEVER throw. A fetch/parse/validate
@@ -1608,6 +1841,23 @@ async function loadContent() {
   return CONTENT_CACHE;
 }
 
+
+// F6 / F3: a unit that is quotable but not marked available (e.g. WindSong 1BR/3BR)
+// is quoted with the coming-soon + waitlist line, including in fallback mode.
+function isComingSoonUnit_(u) {
+  return !!(u && u.quotable && String(u.status || '') !== 'available');
+}
+
+// How a unit line should be spoken: "available", "coming_soon", "confirm_office", or "unavailable".
+// In fallback mode, never claim AVAILABLE NOW; coming-soon units still use the F6 wording.
+function unitPromptKind_(u, t, avail, usingFallback) {
+  if (isComingSoonUnit_(u)) return 'coming_soon';
+  if (usingFallback) return 'confirm_office';
+  if (Array.isArray(avail) && avail.indexOf(t) !== -1) return 'available';
+  if (u && u.quotable) return 'coming_soon';
+  return 'unavailable';
+}
+
 // Render the property's UNITS summary block from the content record. This is
 // the text that fills ${property.units} in the system prompt.
 function renderUnitsBlock(key, content) {
@@ -1630,11 +1880,22 @@ function renderUnitsBlock(key, content) {
   const label = { '1br': '1 bedroom', '2br': '2 bedroom', '3br': '3 bedroom' };
   const order = key === 'nmfa' ? ['2br', '1br', '3br'] : ['3br', '2br', '1br'];
   const sq = (t) => (p.unit_types[t] && p.unit_types[t].sqft_line) ? ' ' + p.unit_types[t].sqft_line + '.' : '';
-  return '\n' + order.filter(t => p.unit_types[t]).map(t =>
-    avail.indexOf(t) !== -1
-      ? label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]) + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.'
-      : label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]) + ', all utilities included. NOT available right now, coming available soon.'
-  ).join('\n');
+  const usingFallback = isUsingFallbackContent(content);
+  const OFFICE_CONFIRM_EN = 'Let me have the office confirm current availability for you.';
+  return '\n' + order.filter(t => p.unit_types[t]).map(t => {
+    const kind = unitPromptKind_(p.unit_types[t], t, avail, usingFallback);
+    const priced = label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]);
+    if (kind === 'available') {
+      return priced + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.';
+    }
+    if (kind === 'coming_soon') {
+      return priced + ', all utilities included. NOT available right now, coming available soon.';
+    }
+    if (kind === 'confirm_office') {
+      return priced + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' ' + OFFICE_CONFIRM_EN;
+    }
+    return priced + ', all utilities included. NOT available right now, coming available soon.';
+  }).join('\n');
 }
 
 // ============================================================
@@ -1689,9 +1950,30 @@ function buildSystemPrompt(property, content) {
   //    accepting Section 8 is unchanged and still volunteered warmly. Source
   //    of income is not a federally protected class; familial status is.
   const CC   = content || DEFAULT_CONTENT;
-  const nmfaHoursCanon = (CC.properties.nmfa && CC.properties.nmfa.hours_en) || property.hours;
-  const windsongHoursCanon = (CC.properties.windsong && CC.properties.windsong.hours_en) || '';
   const usingFallbackContent = isUsingFallbackContent(CC);
+  const hoursOpts = { usingFallback: usingFallbackContent };
+  const nmfaHoursCanon = hoursFor('nmf', 'en', {
+    store: CC.properties.nmfa && CC.properties.nmfa.hours_en,
+    ...hoursOpts
+  }) || property.hours;
+  const nmfaHoursCanonEs = hoursFor('nmf', 'es', {
+    store: CC.properties.nmfa && CC.properties.nmfa.hours_es,
+    ...hoursOpts
+  });
+  const windsongHoursCanon = hoursFor('windsong', 'en', {
+    store: CC.properties.windsong && CC.properties.windsong.hours_en,
+    ...hoursOpts
+  });
+  const windsongHoursCanonEs = hoursFor('windsong', 'es', {
+    store: CC.properties.windsong && CC.properties.windsong.hours_es,
+    ...hoursOpts
+  });
+  const nmfaStaffHoursEn = formatHoursStatement_(nmfaHoursCanon, 'en');
+  const nmfaStaffHoursEs = formatHoursStatement_(nmfaHoursCanonEs, 'es');
+  const windsongStaffHoursEn = formatHoursStatement_(windsongHoursCanon, 'en');
+  const windsongStaffHoursEs = formatHoursStatement_(windsongHoursCanonEs, 'es');
+  const thisStaffHoursEn = formatHoursStatement_(property.hours, 'en');
+  const thisStaffHoursEs = formatHoursStatement_(property.hours_es || property.hours, 'es');
   const NM2  = CC.properties.nmfa.unit_types['2br'];       // NMFA 2-bedroom prices
   const WS2  = CC.properties.windsong.unit_types['2br'];   // Windsong 2-bedroom prices
   const WS3  = CC.properties.windsong.unit_types['3br'];   // Windsong 3-bedroom prices
@@ -1729,33 +2011,52 @@ function buildSystemPrompt(property, content) {
     const UNIT_PRICE = property.key === 'nmfa'
       ? { '1br': nm1p, '2br': nm2p, '3br': nm3p }
       : { '1br': ws1p, '2br': ws2p, '3br': ws3p };
-    const availSentence = PROP.availability_line_en
+    const availSentence = usingFallbackContent
+      ? 'The live price list could not be loaded for this call. Do not state unit availability as a fact and never claim a unit is currently available. If asked whether a unit is available, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." Exception: Windsong one-bedrooms and three-bedrooms are quoted as coming soon, with the waiting-list offer, as listed below.'
+      : (PROP.availability_line_en
       || (AVAIL.filter(t => UNIT_LABEL[t]).length
             ? 'Right now our ' + AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') + ' are AVAILABLE.'
-            : 'Availability is limited right now - check with the office before offering a tour.');
+            : 'Availability is limited right now - check with the office before offering a tour.'));
     // D-20261112-22: a unit that is quotable but not available carries the store's coming-soon line, in both languages.
     const COMING_EN = 'Coming available soon. I can connect you with our office or add you to our waiting list.';
     const COMING_ES = 'Estar\u00e1 disponible pronto. Puedo ponerle en contacto con nuestra oficina o agregarle a nuestra lista de espera.';
     const comingLine_ = (u) => ({ en: ((u && u.coming_available_en) || COMING_EN), es: ((u && u.coming_available_es) || COMING_ES) });
-    const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
-      AVAIL.indexOf(t) !== -1
-        ? '- ' + UNIT_LABEL[t] + ': "' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included." AVAILABLE NOW - offer it for a tour.'
-        : '- ' + UNIT_LABEL[t] + ': NOT available right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included."' +
-          (PUT[t].quotable ? ' Coming-soon line, English: "' + comingLine_(PUT[t]).en + '" (Spanish, usted: "' + comingLine_(PUT[t]).es + '").' : '') +
-          ' Never say it is available. Never offer it for a tour or application.'
-    ).join('\n');
+    const OFFICE_CONFIRM_EN = 'Let me have the office confirm current availability for you.';
+    const OFFICE_CONFIRM_ES = 'Permítame pedirle a la oficina que le confirme la disponibilidad actual.';
+    const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t => {
+      const kind = unitPromptKind_(PUT[t], t, AVAIL, usingFallbackContent);
+      const priced = '"' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included."';
+      if (kind === 'available') {
+        return '- ' + UNIT_LABEL[t] + ': ' + priced + ' AVAILABLE NOW - offer it for a tour.';
+      }
+      if (kind === 'coming_soon') {
+        return '- ' + UNIT_LABEL[t] + ': NOT available right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: ' + priced +
+          ' Coming-soon line, English: "' + comingLine_(PUT[t]).en + '" (Spanish, usted: "' + comingLine_(PUT[t]).es + '").' +
+          ' Never say it is available. Never offer it for a tour or application.';
+      }
+      if (kind === 'confirm_office') {
+        return '- ' + UNIT_LABEL[t] + ': ' + priced + ' Do not state availability as a fact. If asked whether it is available, say: "' + OFFICE_CONFIRM_EN + '" / "' + OFFICE_CONFIRM_ES + '" You may mention this price as a figure the office will confirm.';
+      }
+      return '- ' + UNIT_LABEL[t] + ': NOT available right now. Do not quote a price. Offer to connect the caller with our office or add them to the waiting list.';
+    }).join('\n');
     const twelveMonthOnlyRule = '\n- The 1-bedroom and the 3-bedroom are twelve-month leases only, at both properties. Say "twelve months only" whenever you give their price. Do not offer a six-month option for them.';
-    const offerableList = AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now';
+    const offerableList = usingFallbackContent
+      ? 'none until the office confirms current availability (for a Windsong one-bedroom or three-bedroom, offer the waiting list or to connect the caller with the office; do not offer a tour as if it were available now)'
+      : (AVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') || 'nothing right now');
     // 2026-09-17: the two sentences below were still hardcoded prose after the 09-02
     // store change - "one-bedrooms are NOT available at either property" and a price
     // list that marked the NMFA 1BR unavailable and the Windsong 2BR available no
     // matter what the store said. Both are now built from the same AVAIL list.
-    const lowPriceRule = AVAIL.indexOf('1br') !== -1
+    const lowPriceRule = usingFallbackContent
+      ? (isComingSoonUnit_(PUT['1br'])
+          ? 'On THIS line the one-bedroom is not available right now. ALWAYS say the price first ("' + UNIT_PRICE['1br'] + ' a month, all utilities included"), then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list.'
+          : 'Give the current one-bedroom price ("' + UNIT_PRICE['1br'] + ' a month, all utilities included") and say: "Let me have the office confirm current availability for you."')
+      : (AVAIL.indexOf('1br') !== -1
       ? 'On THIS line the one-bedroom is AVAILABLE NOW at "' + UNIT_PRICE['1br'] + '" a month, all utilities included, so confirm it and pivot to the tour.'
-      : 'One-bedrooms are NOT available on THIS line right now. Say that, then give the all-in price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour.';
+      : 'One-bedrooms are NOT available on THIS line right now. Say that, then give the all-in price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour.');
     const WORD = { '1br': 'one', '2br': 'two', '3br': 'three' };
     const fallbackAvailabilityRule = usingFallbackContent
-      ? '\nFALLBACK MODE — THE LIVE PRICE LIST COULD NOT BE LOADED FOR THIS CALL:\nDo not state unit availability as a fact. If the caller asks whether a unit is available, say: "Let me have the office confirm current availability for you." You may mention the last known prices below as figures the office will confirm, and you may offer to have the office call them back.\n'
+      ? '\nFALLBACK MODE — THE LIVE PRICE LIST COULD NOT BE LOADED FOR THIS CALL:\nDo not state unit availability as a fact and never claim a unit is currently available. If the caller asks whether a unit is available, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." You may mention the last known prices below as figures the office will confirm, and you may offer to have the office call them back. Exception: Windsong one-bedrooms and three-bedrooms are quotable but not available; say the price first, then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list.\n'
       : '';
     // Pass 8: two-term units (2BR). BOTH lease options are always given together, lead
     // term (TWO_BR_LEAD_TERM) first. They are ongoing options, never a special.
@@ -1765,7 +2066,7 @@ function buildSystemPrompt(property, content) {
       : '\n- TWO LEASE OPTIONS, ALWAYS TOGETHER: for the unit(s) listed above with two lease lengths, every time you give the price, state BOTH lease options in the same sentence, in the order listed above, each with its lease length: ' +
         promoUnits.map(t => UNIT_LABEL[t] + ' "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included"').join('; ') +
         '. These are our two ongoing lease options, said plainly with no extra framing. Do not recommend one over the other and never say either can change. If the caller asks whether the six-month price is a special or a promotion, say it is simply one of our two lease options, then go back to the tour. In Spanish always use usted: ' +
-        promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El apartamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con todos los servicios incluidos."' : ''; }).filter(Boolean).join(' ') +
+        promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El departamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con todos los servicios incluidos."' : ''; }).filter(Boolean).join(' ') +
         ' In Spanish say the lease lengths as "12 meses" and "6 meses" (or "doce meses" and "seis meses"). Never use English number words inside Spanish, such as "twelve meses", "six meses", "contrato de twelve" or "one hundred and four"; say a unit number as digits, for example "unidad 104". Then go back to the tour.';
     // Pass 8: the phone agent never speaks a market rent or a "regular" price.
     const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead. If the caller asks what the market, regular or comparison price is (alone or together with the price), do NOT use the approval sentence and do NOT refuse: say plainly that the listed prices are our current prices ("Those are our current prices." / "Esos son nuestros precios actuales.") and give the unit\'s listed lease option(s) exactly as listed, with no other figure.';
@@ -1774,15 +2075,21 @@ function buildSystemPrompt(property, content) {
     const NUM2 = PUT['2br'] || {};
     const sixOpt2 = promoUnits.indexOf('2br') !== -1 ? sixMonthOption_(NUM2) : null;
     const spoken12 = NUM2.std12_utils_spoken || NUM2.utils_spoken || 'one thousand, five hundred dollars';
-    const fullFigures = 'Use the same full-words form for any unit: nine ninety five is "nine hundred ninety five dollars", eleven hundred is "one thousand one hundred dollars", fifteen hundred is "one thousand five hundred dollars", ' + (sixOpt2 ? 'twelve ninety five is "' + sixOpt2.spoken + '", ' : '') + 'seventeen fifty is "one thousand seven hundred fifty dollars", eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. After correcting or confirming, continue naturally with the tour offer.';
+    const fullFigures = 'Use the same full-words form for current prices only: thirteen hundred is "one thousand three hundred dollars", fifteen hundred is "one thousand five hundred dollars", ' + (sixOpt2 ? 'twelve ninety five is "' + sixOpt2.spoken + '", ' : '') + 'eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. If the caller repeats a retired price, do not confirm it: say "That price is no longer offered. The current price is [listed price for the unit and lease], all utilities included." / "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con todos los servicios incluidos." After correcting or confirming, continue naturally with the tour offer.';
     const readbackRule = sixOpt2
-      ? 'if the caller repeats a price back, match it to the lease term THEY named and answer with the full amount in words. (a) Correct repeat with its term, for example "twelve ninety five for six months" or "fifteen hundred for a year": you may confirm it ("Yes, that is right") and say it in full: "' + sixOpt2.spoken + ' a month on a six-month lease" or "' + spoken12 + ' a month on a twelve-month lease", all utilities included. Do NOT correct a listed figure to the other term\'s price. (b) Misheard as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents): do NOT reply "that is right", "correct", "yes", or "exactly"; correct it plainly and immediately with the full amount for the term they named, for example "Just to be clear, it is ' + sixOpt2.spoken + ' a month on a six-month lease, all utilities included." (or the twelve-month figure if they were repeating that one). (c) A figure paired with the WRONG term (for example the six-month price said as the twelve-month price): give both options as listed. If they named no term, give both options as listed. ' + fullFigures
-      : 'if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "seventeen fifty" as seventeen dollars and fifty cents), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is ' + spoken12 + ' a month, all utilities included." ' + fullFigures;
+      ? 'if the caller repeats a price back, match it to the lease term THEY named and answer with the full amount in words. (a) Correct repeat with its term, for example "twelve ninety five for six months" or "fifteen hundred for a year": you may confirm it ("Yes, that is right") and say it in full: "' + sixOpt2.spoken + ' a month on a six-month lease" or "' + spoken12 + ' a month on a twelve-month lease", all utilities included. Do NOT correct a listed figure to the other term\'s price. (b) Misheard as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars): do NOT reply "that is right", "correct", "yes", or "exactly"; correct it plainly and immediately with the full amount for the term they named, for example "Just to be clear, it is ' + sixOpt2.spoken + ' a month on a six-month lease, all utilities included." (or the twelve-month figure if they were repeating that one). (c) A figure paired with the WRONG term (for example the six-month price said as the twelve-month price): give both options as listed. If they named no term, give both options as listed. ' + fullFigures
+      : 'if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is ' + spoken12 + ' a month, all utilities included." ' + fullFigures;
     const moveInCostRule = buildMoveInCostRule_(property.key, CC, usingFallbackContent);
     const priceFigures = 'Valid all-in MONTHLY figures on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
       ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
         '"' + UNIT_PRICE[t] + '" (' + t.charAt(0) + '-bedroom, all utilities included \u2014 ' +
-        (AVAIL.indexOf(t) !== -1 ? 'AVAILABLE now)' : 'NOT available; say only as "our ' + WORD[t] + '-bedroom, not available right now")')
+        (function () {
+          const kind = unitPromptKind_(PUT[t], t, AVAIL, usingFallbackContent);
+          if (kind === 'available') return 'AVAILABLE now)';
+          if (kind === 'coming_soon') return 'NOT available; say the price first, then the coming-soon line")';
+          if (kind === 'confirm_office') return 'price only; office confirms availability")';
+          return 'NOT available; say only as "our ' + WORD[t] + '-bedroom, not available right now")';
+        }())
       ).join(', ') + '.' +
       (promoUnits.length
         ? ' Two-term units, BOTH figures are valid and are always given together: ' + promoUnits.map(t => t.charAt(0) + '-bedroom "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + '"').join(', ') + '.'
@@ -1798,8 +2105,8 @@ function buildSystemPrompt(property, content) {
     const OP = CC.properties[OTHER_KEY] || {};
     const OPT = OP.unit_types || {};
     let otherPropertyBlock = '';
-    if (usingFallbackContent || !Object.keys(OPT).length) {
-      otherPropertyBlock = '\nTHE OTHER PROPERTY (' + OTHER_NAME + '): the live price list could not be loaded, so do NOT state which units are available there and do NOT quote its prices. If asked, say: "Let me have the office confirm current availability for you."\n';
+    if (!Object.keys(OPT).length) {
+      otherPropertyBlock = '\nTHE OTHER PROPERTY (' + OTHER_NAME + '): the live price list could not be loaded, so do NOT state which units are available there and do NOT quote its prices. If asked, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual."\n';
     } else {
       const OAVAIL = Array.isArray(OP.available_types)
         ? OP.available_types
@@ -1807,25 +2114,50 @@ function buildSystemPrompt(property, content) {
       const oLines = ['1br', '2br', '3br'].filter(t => OPT[t]).map(t => {
         const u = OPT[t];
         const priceWords = priceWithTermText_(u, '');
-        if (OAVAIL.indexOf(t) !== -1) {
+        const kind = unitPromptKind_(u, t, OAVAIL, usingFallbackContent);
+        if (kind === 'available') {
           return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': AVAILABLE NOW. "' + priceWords + ', all utilities included."';
         }
-        if (u.quotable && (u.utils_spoken || u.std12_utils_spoken)) {
+        if (kind === 'coming_soon') {
           const c = comingLine_(u);
           return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWords + ', all utilities included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
         }
+        if (kind === 'confirm_office') {
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': "' + priceWords + ', all utilities included." Do not state availability as a fact. If asked, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual."';
+        }
         return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now. Do not quote a price. Offer to connect the caller with our office or add them to the waiting list.';
       }).join('\n');
-      const oAvailSentence = OAVAIL.filter(t => UNIT_LABEL[t]).length
+      const oAvailSentence = usingFallbackContent
+        ? OTHER_NAME + ' prices may be quoted as listed below. Do not state availability as a fact except for a unit listed as coming soon, which gets the price first, then the coming-soon and waiting-list line.'
+        : (OAVAIL.filter(t => UNIT_LABEL[t]).length
         ? OTHER_NAME + ' units available right now: ' + OAVAIL.filter(t => UNIT_LABEL[t]).map(t => UNIT_LABEL[t] + 's').join(' and ') + '.'
-        : OTHER_NAME + ' has no unit available right now.';
+        : OTHER_NAME + ' has no unit available right now.');
       otherPropertyBlock = '\nTHE OTHER PROPERTY, ' + OTHER_NAME + ' (USE ONLY THESE FACTS WHEN A CALLER ASKS ABOUT IT):\n' +
         '- ' + oAvailSentence + '\n' + oLines + '\n' +
-        '- Availability at ' + OTHER_NAME + ' is separate from this line. NEVER assume ' + OTHER_NAME + ' has a unit available because this line does, and NEVER say a ' + OTHER_NAME + ' unit is available unless it is listed AVAILABLE NOW above. Say "not available right now" for the others, never "available".\n' +
+        (usingFallbackContent
+        ? '- Availability at ' + OTHER_NAME + ' is separate from this line. NEVER assume ' + OTHER_NAME + ' has a unit available because this line does, and never claim a ' + OTHER_NAME + ' unit is currently available. For a coming-soon unit, give the price, then the coming-soon line. For other units, quote the price and ask the office to confirm availability.\n'
+        : '- Availability at ' + OTHER_NAME + ' is separate from this line. NEVER assume ' + OTHER_NAME + ' has a unit available because this line does, and NEVER say a ' + OTHER_NAME + ' unit is available unless it is listed AVAILABLE NOW above. Say "not available right now" for the others, never "available".\n') +
         '- For a ' + OTHER_NAME + ' unit listed NOT AVAILABLE with a price: give the price, then the coming-soon line exactly as written above. Do not offer a tour or an application for it.\n' +
         '- The 1-bedroom and the 3-bedroom are twelve-month leases only, at both properties. Say "twelve months only" whenever you give their price. Do not offer a six-month option for them.\n' +
         '- For a tour or an application at ' + OTHER_NAME + ', offer to connect the caller with our office. Never read the other property\'s facts as if they were this line\'s.\n';
     }
+
+    const datesOfferRule = usingFallbackContent
+      ? '- Never give availability dates. Do not offer a tour as if a unit were confirmed available. Ask the office to confirm current availability. For a coming-soon unit, say the price first, then the coming-soon and waiting-list offer, and do not offer a tour or application for it.'
+      : '- Never give availability dates. Offer only units marked AVAILABLE NOW.';
+    const neverOfferUnavailRule = usingFallbackContent
+      ? 'NEVER offer a tour or an application unless the office has confirmed current availability. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.'
+      : 'NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.';
+    const neverOfferTypeRule = usingFallbackContent
+      ? '- NEVER offer a tour or application as if a unit were confirmed available. Ask the office to confirm first. A coming-soon unit is never offered for a tour or application.'
+      : '- NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.';
+    const afterNamingTourRule = usingFallbackContent
+      ? '- After naming a listed price, you may offer to have the office confirm availability or call the caller back. Do not pitch a tour as if the unit were confirmed available.'
+      : '- After naming an AVAILABLE unit\'s price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"';
+    const waitlistRule = usingFallbackContent
+      ? '- WAITLIST: for a coming-soon unit, or when the caller wants a unit whose availability the office has not confirmed, offer the waiting list or to connect them with the office. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure.'
+      : '- WAITLIST: when the caller still wants a unit type that is NOT available now: first warmly offer the AVAILABLE unit and its all-in price. If the caller is not interested and stays set on the type we do not have, offer the waiting list. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure; you may still offer to text the tour link for the available unit or share the office number.';
+
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 ${fallbackAvailabilityRule}
 GREETING AND DELIVERY RULES — CRITICAL:
@@ -1858,12 +2190,12 @@ PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
 - Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. Apart from the two lease options of a unit listed above, NEVER present two prices or a choice up front. NEVER say the word "bill". NEVER say "most people choose".
 - THIS LINE IS ${property.key === 'nmfa' ? 'NMFA' : 'WINDSONG'}. ${availSentence}
 ${unitLines}${sixMonthRule}${marketRentRule}${twelveMonthOnlyRule}
-- After naming an AVAILABLE unit's price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"
+${afterNamingTourRule}
 - Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
 ${otherPropertyBlock}
-- Never give availability dates. Offer only units marked AVAILABLE NOW.
+${datesOfferRule}
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
-- If the caller says they saw a lower price or "nine ninety five": that WAS our one-bedroom special and it ENDED on October twenty-seventh. Do NOT confirm it and do NOT honor it. Say the special has ended, apologize briefly that the listing they saw is out of date, then give the CURRENT one-bedroom figure from the prices listed above - never a number the caller supplies. ${lowPriceRule} NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.
+- If the caller says they saw a lower price that is not listed above: do NOT confirm it and do NOT honor it. Say: English: "That price is no longer available. The current price is [listed price for the unit and lease], all utilities included." Spanish, formal usted: "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con todos los servicios incluidos." If they were asking about the one-bedroom, the current price is one thousand, three hundred dollars a month on a twelve-month lease, all utilities included. Then give the CURRENT listed figure for the unit they asked about - never a number the caller supplies. ${lowPriceRule} ${neverOfferUnavailRule}
 
 MOVE-IN COST:
 ${moveInCostRule}
@@ -1880,10 +2212,10 @@ REPAIRS — WHO PAYS (ASKED BY A PROSPECT, NOT ONLY A RESIDENT):
 CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 - This line is ${property.key === 'nmfa' ? 'North Mountain Foothills (NMFA)' : 'Windsong'}. It has 1-bedroom, 2-bedroom, and 3-bedroom units. ${availSentence}
 - Offer a tour or application ONLY for: ${offerableList}. If the caller asks about any other unit type, tell them it is not available right now, warmly offer one of the available types with its all-in price, and if they stay set on the type we do not have, offer the waiting list.
-- NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.
+${neverOfferTypeRule}
 - TOUR LINK GATE: only send a tour link for a bedroom count the caller asked for, or explicitly agreed to BY BEDROOM COUNT. A vague "okay" or "sure" right after you pivoted them to a different unit type is NOT agreement to that unit type. Confirm first: "Just so I book the right one, the three-bedroom is what I would be showing you. Does that work?" If they do not clearly say yes to that bedroom count, do NOT send the link.
 - If the caller named a bedroom count and the only AVAILABLE unit is two or more bedroom counts away from it (for example they want a one-bedroom and only a three-bedroom is open), LEAD with the waiting list. Mention the available unit once, with its price, and do not push the tour.
-- WAITLIST: when the caller still wants a unit type that is NOT available now: first warmly offer the AVAILABLE unit and its all-in price. If the caller is not interested and stays set on the type we do not have, offer the waiting list. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure; you may still offer to text the tour link for the available unit or share the office number.
+${waitlistRule}
 
 CONDITIONS:
 - If a caller asks "what are the conditions", "is that a special", or "any catch", say: "Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour." Do not invent specific conditions or lease-length requirements.
@@ -1896,8 +2228,8 @@ PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - If the caller pushes back on price ("that's higher than I expected", "is that the best you can do", "I was hoping for less"), asks about a budget gate ("I can only do up to X"), or hesitates at tour booking ("let me think about it"), DO NOT quote a discount or a lower number. There is no exception, on any unit type, except that you may repeat the two listed 2-bedroom lease options exactly as listed (never as a way to lower the price).
 - Instead, stay neutral and redirect to a tour with this exact framing. Never say or hint that the price can move, is flexible or negotiable, or depends on move-in timing or lease length (the two listed 2-bedroom lease options are fixed listed prices and may be repeated exactly as listed):
   - English: "${NO_SPECIAL_REPLY_EN} I would love to book a time for you to come see it. Is it okay if I text you the tour link?"
-  - Spanish: "${NO_SPECIAL_REPLY_ES} Me encantaría agendar una visita para que usted vea el apartamento. ¿Está bien si le envío el enlace de la cita por texto?"
-- NEVER say "they can offer", "the discount is", "you can get nine ninety five", or any specific lower number. You never offer, hint at or discuss any pricing beyond the figures listed here.
+  - Spanish: "${NO_SPECIAL_REPLY_ES} Me encantaría agendar una visita para que usted vea el departamento. ¿Está bien si le envío el enlace para reservar un recorrido por texto?"
+- NEVER say "they can offer", "the discount is", or any specific lower number. You never offer, hint at or discuss any pricing beyond the figures listed here.
 
 PET POLICY:
 STEP 1 - DECIDE WHAT KIND OF ANIMAL THIS IS. Do this BEFORE you say any number. Do not read the
@@ -1964,13 +2296,13 @@ LEASING FLOW:
 - After the tour link is sent, optionally offer ONCE: "Would you also like me to send you the application link so you can get a head start?" If they say no, do not ask again.
 - When offering the application: ask ONCE "Is it okay if I text you the application link as well?"; once they agree, say ONCE "I am sending you the application link right now." Same rule — say it a single time, never repeat.
 - AFTER the tour link (and application link, if offered) are handled, ASK: "Is there anything else I can help you with?" Answer any further questions. Do NOT jump straight from sending a link to the goodbye. Only move to the CLOSING once the caller has nothing more.
-- Urgency: "We can arrange a showing any time, including weekends."
+- Urgency: "You can pick an open time from our tour link." / "Puede elegir un horario disponible en nuestro enlace de visitas." Never say a showing can be arranged any time or on weekends unless the stored hours for this property say so.
 - WALK-IN INTENT: if the caller says they will come by, stop by, or visit in person, or only asks for the address, do NOT just give the address and let them go. Warmly offer to get them on the calendar: "Happy to give you the address, and if you'd like, I can text you our tour link so you can pick a time and we'll have someone ready for you. Want me to send it?" If they would rather just drop by, that is fine: try to grab their first name once so the team can look out for them. Make the offer ONCE, never pushy.
 - NEVER end the call abruptly. Always offer the tour link before saying goodbye if it has not been sent.
 
 CLOSING — only AFTER you have asked "Is there anything else I can help you with?" and the caller has nothing more, say EXACTLY this template, no variants (do NOT jump to it straight from sending a link):
 - English: "Looking forward to meeting you, [Name]. Reach out anytime by call or text." If the caller never gave a name, drop the name token but keep the rest.
-- Spanish: "Estoy emocionado de conocerle, [Nombre]. Llame o escriba cuando quiera." If the caller never gave a name, drop the name token but keep the rest.
+- Spanish: "Espero conocerle, [Nombre]. Llame o escriba cuando quiera." If the caller never gave a name, drop the name token but keep the rest.
 - DO NOT say "Take care", "Thanks for choosing Mattgab Management", "Que tengas un excelente día", or "Feel free to call or text this number anytime". Those phrasings are deprecated as of May 21, 2026 and must not appear in a closing turn.
 - Say the closing template ONCE, then STOP. Do not repeat it and do not stack extra goodbyes. If the caller says "bye" or "thank you" after your closing, reply with at most a single short "Bye!" (or "¡Adiós!") and end there. NEVER send multiple back-to-back farewell messages.
 
@@ -2006,11 +2338,11 @@ ESCALATION — RESCHEDULE OR HUMAN REQUEST
 ============================================================
 
 If the caller says they want to "reschedule," "change my tour," "move my appointment," "cancel my tour," "I already have a tour," "I have a tour booked," or anything that signals an EXISTING booking, do NOT try to qualify them again and do NOT ask for their name. You do not have access to the booking system. On the SAME turn, route them to the office:
-"For tour changes our team handles that directly. Please call our office at ${property.phone}. They can look up your booking and reschedule on the spot. Our hours are ${property.hours}."
+"For tour changes our team handles that directly. Please call our office at ${property.phone}. They can look up your booking and reschedule on the spot. ${thisStaffHoursEn}"
 Then close with the CLOSING template above (English or Spanish per call language). Do not use the deprecated "Feel free to call or text this number anytime" wording.
 
 If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
-"Of course. You can reach our office at ${property.phone}. Our hours are ${property.hours}. Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?"
+"Of course. You can reach our office at ${property.phone}. ${thisStaffHoursEn} Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?"
 If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
 TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the caller says yes to leaving a message, OR says they already called the office, the office did not answer, the office is closed, or they want to "leave a message," do NOT read the office number again. Take the message right away, one question per turn:
 1. "Can I get your first name?"
@@ -2020,7 +2352,7 @@ Then confirm. If the caller gave a different callback number, read that number b
 BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence. If the caller gave a different callback number, read that number back once, digit by digit, in the confirmation: "Thank you, [Name]. I have your message, and I'll call you back at [their number, digit by digit]." If they said the number they are calling from is best, do not read a number back; say: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
-Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. Nuestro horario es ${property.hours_es || property.hours}. O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
+Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. ${thisStaffHoursEs} O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
 
 ============================================================
 LANGUAGE RULES
@@ -2039,13 +2371,15 @@ OFFICE HOURS RULE — CRITICAL
 ============================================================
 This rule applies whenever you state hours: a direct hours question, a maintenance turn, a "speak to a person" or message turn, and after you give a staff number. If hours were not asked, you may omit them; if you do mention hours, they must be the canonical string and nothing else.
 
-When the caller asks any general question about office hours ("what are your hours", "when are you open", "are you open Saturday", "what days are you open", etc.) WITHOUT naming a staff member, answer with EXACTLY the canonical hours string for this property and NOTHING else. Read it as written, do not paraphrase, do not invent additional days or times, do not add "by appointment only" or "Sunday closed" or "closed on weekends" language unless that exact phrase is in the canonical string. Never invent hours.
+When the caller asks any general question about office hours ("what are your hours", "when are you open", "are you open on the weekend", "what days are you open", etc.) WITHOUT naming a staff member, answer with EXACTLY the canonical hours string for this property and NOTHING else. Read it as written, do not paraphrase, do not invent additional days or times, do not add "by appointment only" or "Sunday closed" or "closed on weekends" language unless that exact phrase is in the canonical string. Never invent hours.
 
-CANONICAL HOURS FOR THIS CALL: "${property.hours}."
+CANONICAL HOURS FOR THIS CALL (English): "${punctuateHours_(property.hours)}"
+CANONICAL HOURS FOR THIS CALL (Spanish): "${punctuateHours_(property.hours_es || property.hours)}"
+On a Spanish call, speak the Spanish canonical string exactly. Do not wrap it again in "El horario de la oficina es" or "Nuestro horario es" if it is already a complete sentence.
 
 After stating the hours on an hours question, follow with ONE short next step like "Would you like me to send you the tour link so you can pick a time?" Never end on the hours alone. On a maintenance or "speak to a person" turn, after any hours you state, continue with the message / extension steps for that turn.
 
-If the caller asks about a specific staff member's hours (Felipa, Stephany, Viola, Brian, Angel, Jose, Yanelia, or any of their alias variants), use the per-person hours from the STAFF-TO-EXTENSION MAPPING rule below, NOT this canonical string. Per-person hours are also taken from the store, not invented.
+If the caller asks about a specific staff member's hours (Felipa, Viola, Brian, Angel, Jose, Yanelia, or any of their alias variants), use the per-person hours from the STAFF-TO-EXTENSION MAPPING rule below, NOT this canonical string. Per-person hours are also taken from the store, not invented. If the caller asks about Stephany's hours (or Stephanie, Stefanie, Estefani, Estefany, or Tiffany), do not give her personal hours or an extension; route by the caller's need as in the STEPHANY rule below, and take a message for Viola (leasing and resident questions) or Jose (maintenance). Emergencies stay on the Maintenance line, extension three.
 
 ============================================================
 RULES
@@ -2058,14 +2392,14 @@ RULES
 - NEVER send to office unless emergency or caller asks for a person.
 - Person requested: main office line ${property.phone}, ${property.hours}, and offer to take a message for a callback (see TAKE THE MESSAGE above). NEVER give this AI line (${property.ai_number}) as a way to reach staff — it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
-- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. Our hours are ${nmfaHoursCanon}." Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing, so when the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA AND STEPHANY NO LONGER WORK HERE: if a caller asks for either one, do not route to them and do not say why they left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," or for Stephany "Stephany is no longer with us. Viola handles leasing now and can help you with anything Stephany would have," then give Viola's NMFA number and hours (extension one, as above). Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. Our hours are ${windsongHoursCanon}." Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${property.hours}). Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
-- NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; give the departure message from the mapping above, then offer Viola): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A, Hosie. For Yanelia (still with NMFA; take a message, do not invent an extension): Yaneli, Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
+- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. ${nmfaStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${nmfaStaffHoursEs}" Do not also say "Our hours are" or "El horario de la oficina es" if that string is already a complete sentence. Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing. Leasing and resident questions go to Viola. When the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA NO LONGER WORKS HERE: if a caller asks for Felipa, do not route to her and do not say why she left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," then give Viola's NMFA number and hours (extension one, as above). STEPHANY NO LONGER WORKS HERE: if a caller asks for Stephany (or Stephanie, Stefanie, Estefani, Estefany, or Tiffany), do not route to her, do not give her personal hours, do not say her name, and do not say why she left. Route by the caller's need: leasing and resident questions go to Viola; maintenance goes to Jose. Emergencies stay on the existing Maintenance line, extension three. For leasing or a resident question, take a message for Viola. Say warmly: "${VIOLA_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${VIOLA_MESSAGE_ES}" For maintenance, take a message for Jose. Say warmly: "${JOSE_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${JOSE_MESSAGE_ES}" Ask for their first name if you do not have it, ask what they would like you to tell Viola or Jose, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to that person. Do not invent an extension or transfer number. Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. ${windsongStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${windsongStaffHoursEs}" Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Maintenance questions go to Jose. Emergencies stay on the Maintenance line, extension three. Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${thisStaffHoursEn}). On a Spanish call, use the Spanish hours (${thisStaffHoursEs}) instead of the English hours. Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
+- NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; do not say the name or why she left; take a message for Viola on leasing and resident questions, or for Jose on maintenance): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A, Hosie. For Yanelia (still with NMFA; take a message, do not invent an extension): Yaneli, Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
-- Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Estoy emocionado de conocerle, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
+- Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Espero conocerle, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
-- Write all prices as full words. ${priceFigures} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER use ${orList([...OBS, ...OBSX])} anywhere; those are obsolete figures we no longer quote.
+- Write all prices as full words. ${priceFigures} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER quote a monthly figure that is not one of the listed prices above.
 - Write all numbers as words when speaking about prices.
 - PRICE READBACK CORRECTION: ${readbackRule}
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
@@ -2328,6 +2662,12 @@ function phonesInText_(text) {
 
 function extractCallbackNumber_(session) {
   const callerId = normalizeUsPhone_(session && session.from);
+  const cbState = session && session.callbackReadback;
+  if (cbState && cbState.status === 'caller_id') return callerId || '';
+  if (cbState && cbState.number) {
+    const n = normalizeUsPhone_(cbState.number);
+    if (n) return n;
+  }
   const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
   let last = '';
   for (let i = 0; i < turns.length; i++) {
@@ -2340,13 +2680,952 @@ function extractCallbackNumber_(session) {
 }
 
 // ============================================================
+// CALLBACK NUMBER READ-BACK (D-20261112-22 v38, preview)
+// ============================================================
+// Deterministic confirmation after a caller gives a callback number.
+// Prompt-only read-back was skipped on the staging test call (Leo went
+// straight to "anything else"). This runs before the model and before
+// the lead is finalized. It cannot loop: at most two read-back attempts,
+// then the call moves on. Zero is spoken as "zero", never "oh".
+// Nothing here changes Twilio, Railway, or production.
+const CB_EN_DIGITS_ = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+const CB_ES_DIGITS_ = ['cero', 'uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
+
+function callbackPhoneDigits_(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 11 && digits.charAt(0) === '1') return digits.slice(1);
+  if (digits.length === 10) return digits;
+  return '';
+}
+
+function speakDigitGroup_(digits, isSpanish) {
+  const words = isSpanish ? CB_ES_DIGITS_ : CB_EN_DIGITS_;
+  return String(digits || '').split('').map(function (ch) {
+    const i = Number(ch);
+    return (i >= 0 && i <= 9) ? words[i] : '';
+  }).filter(Boolean).join(' ');
+}
+
+function speakPhoneGrouped_(raw, isSpanish) {
+  const d = callbackPhoneDigits_(raw);
+  if (d.length !== 10) return '';
+  return speakDigitGroup_(d.slice(0, 3), isSpanish)
+    + '... '
+    + speakDigitGroup_(d.slice(3, 6), isSpanish)
+    + '... '
+    + speakDigitGroup_(d.slice(6), isSpanish);
+}
+
+function speakLastFour_(raw, isSpanish) {
+  const d = callbackPhoneDigits_(raw);
+  if (d.length < 4) return '';
+  return speakDigitGroup_(d.slice(-4), isSpanish);
+}
+
+function anythingElseQuestion_(isSpanish) {
+  return isSpanish
+    ? '¿Hay algo más en lo que pueda ayudarle?'
+    : 'Is there anything else I can help you with?';
+}
+
+function withAnythingElse_(sentence, isSpanish) {
+  return String(sentence || '').replace(/[ \t]+$/, '') + ' ' + anythingElseQuestion_(isSpanish);
+}
+
+function callbackReadbackLines_(isSpanish) {
+  if (isSpanish) {
+    return {
+      readback: function (spoken) {
+        return 'Permítame confirmar. El número es ' + spoken + '. ¿Es correcto?';
+      },
+      yes: 'Perfecto, muchas gracias. Nuestro equipo le devolverá la llamada a ese número durante el horario de oficina.',
+      no: 'No se preocupe. Por favor, repítame el número despacio, comenzando con el código de área.',
+      unconfirmed: 'Gracias. Anotaré el número tal como lo tengo, y nuestro equipo también tendrá el número desde el que nos llama.',
+      short: 'Creo que me faltaron algunos dígitos. ¿Podría repetirme el número completo, con el código de área?',
+      callerId: function (last4) {
+        return 'Perfecto, le llamaremos al número desde el que llama, que termina en ' + last4 + '.';
+      }
+    };
+  }
+  return {
+    readback: function (spoken) {
+      return 'Let me make sure I have that right. That\'s ' + spoken + '. Is that correct?';
+    },
+    yes: 'Perfect, thank you. Our team will call you back at that number during office hours.',
+    no: 'No problem. Please say the number again, slowly, starting with the area code.',
+    unconfirmed: 'Thank you. I\'ll note the number as best I have it, and our team will also have the number you\'re calling from.',
+    short: 'I think I missed a few digits. Could you repeat the full number, including the area code?',
+    callerId: function (last4) {
+      return 'Great, we\'ll call you back at the number you\'re calling from, ending in ' + last4 + '.';
+    }
+  };
+}
+
+function ensureCallbackReadbackState_(session) {
+  if (!session.callbackReadback) {
+    session.callbackReadback = { phase: 'idle', number: '', attempts: 0, shortTries: 0, status: null };
+  }
+  return session.callbackReadback;
+}
+
+function callbackReadbackStatus_(session) {
+  const cb = session && session.callbackReadback;
+  if (!cb || !cb.status) return '';
+  if (cb.status === 'confirmed') return 'confirmed';
+  if (cb.status === 'unconfirmed') return 'unconfirmed';
+  return '';
+}
+
+function callbackNotesPrefix_(session, storedPhone) {
+  const a = normalizeUsPhone_(storedPhone), b = normalizeUsPhone_(session && session.from);
+  if (!(a && b && a !== b)) return '';
+  let prefix = 'CALLBACK NUMBER GIVEN: ' + storedPhone + '. Inbound caller ID (the number this call came from) was ' + session.from + '.\n';
+  const status = callbackReadbackStatus_(session);
+  if (status) {
+    prefix = prefix.replace(
+      'CALLBACK NUMBER GIVEN: ' + storedPhone + '.',
+      'CALLBACK NUMBER GIVEN: ' + storedPhone + ' (' + status + ').'
+    );
+    if (status === 'unconfirmed') {
+      prefix = prefix.replace(/\n$/, ' CALLBACK UNCONFIRMED.\n');
+    }
+  }
+  return prefix;
+}
+
+function lastTurnByRole_(session, role) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i] && turns[i].role === role) return String(turns[i].content || '');
+  }
+  return '';
+}
+
+function flattenCbText_(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function assistantAskedCallingFromBest_(text) {
+  const t = flattenCbText_(text);
+  return /\b(number youre calling from|number you are calling from|calling from.{0,60}callback|best (one|number) for a callback|mejor numero.{0,40}llamada|numero.{0,40}devolverle la llamada|numero desde el que)\b/.test(t);
+}
+
+function assistantAskedToRepeatOrConfirmNumber_(text) {
+  const t = flattenCbText_(text);
+  return /\b(say the (best )?number|repeat the (full )?number|starting with the area code|repitame el numero|codigo de area|missed a few digits|faltaron algunos digitos|numero completo)\b/.test(t)
+    || /\b(let me make sure i have that right|permitame confirmar|is that correct|es correcto)\b/.test(t);
+}
+
+function assistantInCallbackFlow_(text) {
+  return assistantAskedCallingFromBest_(text) || assistantAskedToRepeatOrConfirmNumber_(text);
+}
+
+function userOfferedCallbackPhrase_(text) {
+  const t = flattenCbText_(text);
+  return /\b(call me( back)? at|callback number|my (phone |call back )?number is|el numero es|mi numero (es|para)|llameme al|devuelv[ae]me( la llamada)? al)\b/.test(t);
+}
+
+function looksLikeOfficeNumberTalk_(text) {
+  const t = flattenCbText_(text);
+  return /\b(office (number|line|phone)|numero de (la )?oficina|extension|mantenimiento|maintenance line|linea de mantenimiento)\b/.test(t)
+    || /\b(what is your number|cual es (el|su) numero)\b/.test(t);
+}
+
+function looksLikeNewTopicDuringConfirm_(text) {
+  const t = flattenCbText_(text);
+  if (phonesInText_(text).length) return false;
+  return /\b(price|rent|tour|bedroom|available|hours|apply|application|precio|renta|recorrido|disponible|horario|apartamento|apartment)\b/.test(t);
+}
+
+function isCallbackAffirmative_(text) {
+  const t = flattenCbText_(text);
+  if (!t) return false;
+  if (/\b(no|nope|nah|wrong|incorrect|not right|not correct|that is not|thats not|no es|incorrecto|tampoco)\b/.test(t)) return false;
+  return /^(um+|uh+|er+|well|ok|okay)?\s*(yes|yeah|yep|yup|yea|correct|right|thats right|that is right|thats correct|that is correct|sounds right|youve got it|you have got it|perfecto|correcto|si|asi es|es correcto|esta bien)\b/.test(t)
+    || /\b(yes that is correct|yes thats correct|thats correct|that is correct|es correcto|asi es)\b/.test(t);
+}
+
+function isCallbackNegativeOrUnsure_(text) {
+  const t = flattenCbText_(text);
+  if (!t) return false;
+  return /\b(no|nope|nah|wrong|incorrect|not right|not correct|that is not|thats not|try again|not sure|do not think|dont think|i dont know|no se|no es|incorrecto|tampoco|no es correcto|no es asi|no estoy seguro|quiza|maybe)\b/.test(t);
+}
+
+function isCallerIdConfirmation_(text) {
+  const t = flattenCbText_(text);
+  if (/\b(this number is (fine|best|good|ok|okay)|number im calling from|number i am calling from|calling from is (fine|best|good)|este numero (esta bien|es el mejor)|numero desde el que (llamo|llama))\b/.test(t)) {
+    return !isCallbackNegativeOrUnsure_(text);
+  }
+  return isCallbackAffirmative_(text);
+}
+
+function incompleteCallbackDigits_(text) {
+  if (phonesInText_(text).length) return '';
+  const WORD = {
+    zero: '0', oh: '0', one: '1', two: '2', three: '3', four: '4', five: '5',
+    six: '6', seven: '7', eight: '8', nine: '9',
+    cero: '0', uno: '1', dos: '2', tres: '3', cuatro: '4', cinco: '5',
+    seis: '6', siete: '7', ocho: '8', nueve: '9'
+  };
+  const tokens = String(text || '').toLowerCase().match(/[a-z]+|\d+/g) || [];
+  let run = '';
+  let best = '';
+  const flush = function () {
+    let d = run;
+    run = '';
+    if (d.length === 11 && d.charAt(0) === '1') d = d.slice(1);
+    if (d.length >= 5 && d.length <= 9 && d.length > best.length) best = d;
+  };
+  for (let i = 0; i < tokens.length; i++) {
+    const tok = tokens[i];
+    const d = Object.prototype.hasOwnProperty.call(WORD, tok) ? WORD[tok] : (/^\d+$/.test(tok) ? tok : null);
+    if (d != null) run += d;
+    else flush();
+  }
+  flush();
+  return best;
+}
+
+function looksLikeShortCallbackAttempt_(text) {
+  if (phonesInText_(text).length) return false;
+  const d = incompleteCallbackDigits_(text);
+  if (!d) return false;
+  if (/\b(unit|apto|apartment|apt|ext|extension|bedroom|recamara)\b/i.test(flattenCbText_(text)) && d.length <= 4) return false;
+  return true;
+}
+
+function lastUserPhone_(text) {
+  const nums = phonesInText_(text);
+  return nums.length ? nums[nums.length - 1] : '';
+}
+
+function turnIsMostlyAPhoneNumber_(text) {
+  if (!lastUserPhone_(text)) return false;
+  const leftover = flattenCbText_(text)
+    .replace(/\b(zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|my|number|is|the|callback|call|me|back|at|please|its|it|el|numero|es|mi|para|al|la|llamada|best|one)\b/g, ' ')
+    .replace(/\d+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return leftover.length <= 12;
+}
+
+function finishCallbackUnconfirmed_(cb, isSpanish) {
+  cb.status = 'unconfirmed';
+  cb.phase = 'done';
+  return withAnythingElse_(callbackReadbackLines_(isSpanish).unconfirmed, isSpanish);
+}
+
+function startOrContinueReadback_(cb, phone, isSpanish) {
+  cb.number = phone;
+  if (cb.attempts >= 2) return finishCallbackUnconfirmed_(cb, isSpanish);
+  cb.attempts += 1;
+  cb.phase = 'awaiting_confirm';
+  const spoken = speakPhoneGrouped_(phone, isSpanish);
+  return callbackReadbackLines_(isSpanish).readback(spoken);
+}
+
+function shortCallbackPrompt_(cb, isSpanish) {
+  cb.shortTries = (cb.shortTries || 0) + 1;
+  if (cb.shortTries > 2) return finishCallbackUnconfirmed_(cb, isSpanish);
+  cb.phase = 'awaiting_repeat';
+  return callbackReadbackLines_(isSpanish).short;
+}
+
+function confirmCallerId_(cb, callerId, isSpanish) {
+  const last4 = speakLastFour_(callerId, isSpanish);
+  if (!last4) return null;
+  cb.status = 'caller_id';
+  cb.phase = 'done';
+  cb.number = '';
+  return withAnythingElse_(callbackReadbackLines_(isSpanish).callerId(last4), isSpanish);
+}
+
+function handleCallbackReadback_(session) {
+  if (!session) return null;
+  const cb = ensureCallbackReadbackState_(session);
+  if (cb.phase === 'done') return null;
+  const isSpanish = !!session.isSpanish;
+  const lines = callbackReadbackLines_(isSpanish);
+  const userText = lastTurnByRole_(session, 'user');
+  const assistantText = lastTurnByRole_(session, 'assistant');
+  const callerId = normalizeUsPhone_(session.from);
+  const phone = lastUserPhone_(userText);
+  const inFlow = cb.phase !== 'idle' || assistantInCallbackFlow_(assistantText) || userOfferedCallbackPhrase_(userText);
+  const officeTalk = looksLikeOfficeNumberTalk_(userText);
+
+  if (cb.phase === 'awaiting_confirm') {
+    if (looksLikeNewTopicDuringConfirm_(userText)) return null;
+    if (phone && phone !== cb.number) {
+      return startOrContinueReadback_(cb, phone, isSpanish);
+    }
+    if (isCallbackAffirmative_(userText) && !isCallbackNegativeOrUnsure_(userText)) {
+      cb.status = 'confirmed';
+      cb.phase = 'done';
+      return withAnythingElse_(lines.yes, isSpanish);
+    }
+    if (looksLikeShortCallbackAttempt_(userText)) return shortCallbackPrompt_(cb, isSpanish);
+    if (isCallbackNegativeOrUnsure_(userText) || !phone) {
+      if (cb.attempts >= 2) return finishCallbackUnconfirmed_(cb, isSpanish);
+      cb.phase = 'awaiting_repeat';
+      return lines.no;
+    }
+  }
+
+  if (cb.phase === 'awaiting_repeat') {
+    if (phone) return startOrContinueReadback_(cb, phone, isSpanish);
+    if (looksLikeShortCallbackAttempt_(userText)) return shortCallbackPrompt_(cb, isSpanish);
+    return shortCallbackPrompt_(cb, isSpanish);
+  }
+
+  if (officeTalk) return null;
+
+  if (inFlow && !phone && isCallerIdConfirmation_(userText) && assistantAskedCallingFromBest_(assistantText)) {
+    return confirmCallerId_(cb, callerId, isSpanish);
+  }
+
+  if (phone && !officeTalk) {
+    const shouldStart = inFlow || (phone !== callerId && turnIsMostlyAPhoneNumber_(userText));
+    if (shouldStart) {
+      if (phone === callerId) return confirmCallerId_(cb, callerId, isSpanish);
+      return startOrContinueReadback_(cb, phone, isSpanish);
+    }
+  }
+
+  if (inFlow && !phone && looksLikeShortCallbackAttempt_(userText)) {
+    return shortCallbackPrompt_(cb, isSpanish);
+  }
+
+  if (inFlow && !phone && isCallbackNegativeOrUnsure_(userText) && assistantAskedCallingFromBest_(assistantText)) {
+    cb.phase = 'awaiting_repeat';
+    return lines.no;
+  }
+
+  return null;
+}
+
+function maybeScriptedCallbackReply_(session) {
+  const reply = handleCallbackReadback_(session);
+  if (!reply) return null;
+  const spoken = neverEmptyReply(reply, { isSpanish: session.isSpanish });
+  session.conversation = session.conversation || [];
+  session.conversation.push({ role: 'assistant', content: spoken });
+  session.replyCommitted = true;
+  return spoken;
+}
+
+// ============================================================
+// LOOP GUARD: stall and repeat detection (D-20261112-22 v39, preview)
+// ============================================================
+// The Nov 12 11:57 AM NMF call looped for 18 minutes: the caller said only
+// "Message" and Leo answered "How can I help?" about 60 times. This guard
+// maps short keywords to an intent, offers a menu then a message, and hangs
+// up after a stall or a 12-minute hard cap. Soft cap is 8 minutes.
+//
+// The 8 and 12 minute limits are settings with those safe defaults. They
+// can be changed here, or overridden on a session for tests. They are not
+// Railway variables, and this preview does not change any Railway setting.
+//
+// The v38 callback read-back (2-attempt cap) always runs before this guard
+// and is never replaced by a loop-guard step mid-confirm.
+// Nothing here is a production change, a Twilio change, or a test call.
+const LOOP_GUARD_SETTINGS = {
+  LOOP_SOFT_CAP_MS: 8 * 60 * 1000,
+  LOOP_HARD_CAP_MS: 12 * 60 * 1000
+};
+
+function loopGuardCaps_(session) {
+  const dSoft = 8 * 60 * 1000;
+  const dHard = 12 * 60 * 1000;
+  const src = Object.assign({}, LOOP_GUARD_SETTINGS, (session && session.loopGuardCaps) || {});
+  let soft = Number(src.LOOP_SOFT_CAP_MS);
+  let hard = Number(src.LOOP_HARD_CAP_MS);
+  if (!Number.isFinite(soft) || soft <= 0) soft = dSoft;
+  if (!Number.isFinite(hard) || hard <= 0) hard = dHard;
+  if (hard <= soft) hard = soft + 4 * 60 * 1000;
+  return { LOOP_SOFT_CAP_MS: soft, LOOP_HARD_CAP_MS: hard };
+}
+
+function loopGuardNow_(session, nowMs) {
+  if (nowMs != null && Number.isFinite(Number(nowMs))) return Number(nowMs);
+  if (session && session.loopGuardNow != null && Number.isFinite(Number(session.loopGuardNow))) {
+    return Number(session.loopGuardNow);
+  }
+  return Date.now();
+}
+
+function normalizeLoopText_(text) {
+  const words = String(text || '')
+    .toLowerCase()
+    .replace(/[’']/g, '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+  const collapsed = [];
+  for (let i = 0; i < words.length; i++) {
+    if (collapsed.length && collapsed[collapsed.length - 1] === words[i]) continue;
+    collapsed.push(words[i]);
+  }
+  return collapsed.join(' ');
+}
+
+function loopGuardWordCount_(text) {
+  const n = normalizeLoopText_(text);
+  return n ? n.split(' ').length : 0;
+}
+
+function looksUnintelligible_(text) {
+  const norm = normalizeLoopText_(text);
+  if (!norm) return true;
+  const tokens = norm.split(' ');
+  const filler = /^(uh+|um+|umm+|hmm+|mmm+|ah+|er+|huh+|eh+|what|sorry|pardon|noise|zzz+|huh|i+)$/;
+  return tokens.every(function (w) { return filler.test(w) || /^\d+$/.test(w); });
+}
+
+function loopGuardLines_(isSpanish) {
+  if (isSpanish) {
+    return {
+      A: 'Puedo ayudarle con precios, disponibilidad, programar una visita o tomar un mensaje para nuestro equipo. ¿Qué le gustaría?',
+      B: 'Permítame tomar un mensaje para que nuestro equipo le devuelva la llamada. ¿Cuál es su nombre?',
+      C: 'Estoy teniendo dificultades para escucharle, así que nuestro equipo le devolverá la llamada al número desde el que llama. También puede comunicarse con nuestra oficina en horario de oficina. Gracias por llamar. Adiós.',
+      soft: 'Solo para que lo sepa, puedo tomar un mensaje para nuestro equipo o comunicarle con la oficina.',
+      message: 'Claro. ¿Me puede dar su nombre?',
+      nameAgain: '¿Me puede dar su nombre, por favor?',
+      price: 'Puedo ayudarle con nuestros precios actuales, todos los servicios incluidos. ¿Qué tamaño busca, de una, dos o tres recámaras?',
+      tour: 'Puedo ayudarle a programar una visita. ¿Desea que le envíe el enlace para reservar un recorrido?',
+      bye: 'Gracias por llamar. Adiós.'
+    };
+  }
+  return {
+    A: 'I can help with prices, availability, scheduling a tour, or taking a message for our team. Which would you like?',
+    B: "Let me take a message so our team can call you back. What's your first name?",
+    C: "I'm having trouble hearing you, so I'll have our team call you back at the number you're calling from. You can also reach our office during office hours. Thank you for calling, goodbye.",
+    soft: 'Just so you know, I can take a message for our team or connect you with the office.',
+    message: 'Of course. Can I get your first name?',
+    nameAgain: "Sorry, what's your first name?",
+    price: 'I can help with our current prices, all utilities included. Which bedroom size are you interested in, the one, two, or three bedroom?',
+    tour: 'I can help you schedule a tour. Would you like me to text you the tour link?',
+    bye: 'Thank you for calling. Goodbye.'
+  };
+}
+
+function officeHandoffLine_(session, isSpanish) {
+  const property = (session && session.property) || {};
+  const phone = property.phone || '602-997-2928 extension 1';
+  if (isSpanish) {
+    const hours = formatHoursStatement_(property.hours_es || property.hours || '', 'es');
+    const spokenPhone = String(phone).replace(/extension/i, 'extensión');
+    return 'Claro. Puede comunicarse con nuestra oficina al ' + spokenPhone + '. ' + hours + ' O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?';
+  }
+  const hours = formatHoursStatement_(property.hours || '', 'en');
+  return 'Of course. You can reach our office at ' + phone + '. ' + hours + ' Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?';
+}
+
+function ensureLoopGuardState_(session, nowMs) {
+  if (!session) return null;
+  if (!session.loopGuard) {
+    const now = loopGuardNow_(session, nowMs);
+    session.loopGuard = {
+      noProgressTurns: 0,
+      repeatCount: 0,
+      leoRepeat: 0,
+      silenceTurns: 0,
+      callStart: now,
+      lastCallerNorm: '',
+      lastStep: '',
+      messageFlow: false,
+      softCapSpoken: false,
+      hungUp: false,
+      exit: null,
+      saveRequested: false,
+      leadSnapshot: null,
+      slots: {},
+      userTurns: 0
+    };
+  } else if (session.loopGuard.callStart == null) {
+    session.loopGuard.callStart = loopGuardNow_(session, nowMs);
+  }
+  return session.loopGuard;
+}
+
+function inActiveCallbackReadback_(session) {
+  const cb = session && session.callbackReadback;
+  return !!(cb && (cb.phase === 'awaiting_confirm' || cb.phase === 'awaiting_repeat'));
+}
+
+function lastAssistantLoopTexts_(session, n) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  const out = [];
+  for (let i = turns.length - 1; i >= 0 && out.length < (n || 2); i--) {
+    if (turns[i] && turns[i].role === 'assistant') out.push(normalizeLoopText_(turns[i].content || ''));
+  }
+  return out;
+}
+
+function wouldBeThirdLeoRepeat_(session, reply) {
+  const norm = normalizeLoopText_(reply);
+  if (!norm) return false;
+  const last = lastAssistantLoopTexts_(session, 2);
+  return last.length >= 2 && last[0] === norm && last[1] === norm;
+}
+
+function loopGuardKeywordIntent_(text) {
+  const norm = normalizeLoopText_(text);
+  if (!norm) return null;
+  if (loopGuardWordCount_(text) > 3 && !isBareMessageRequest_(text)) return null;
+  // Refusals win: "no message" is not a request to leave one.
+  if (/\b(no|nope|not|dont|nada)\b/.test(norm) && /\b(message|mensaje|recado|voicemail)\b/.test(norm)) return null;
+  if (/\b(mensaje|recado)\b/.test(norm) || /\b(leave a message|dejar un mensaje|dejar un recado)\b/.test(norm) || /\b(message|voicemail)\b/.test(norm) || isBareMessageRequest_(text)) {
+    const spanish = /\b(mensaje|recado|dejar)\b/.test(norm);
+    return { intent: 'message', spanish: spanish };
+  }
+  if (/\b(agent|person|office|human|agente|persona|oficina)\b/.test(norm)) {
+    return { intent: 'office', spanish: /\b(agente|persona|oficina)\b/.test(norm) };
+  }
+  if (/\b(price|rent|cost|precio|renta)\b/.test(norm)) {
+    return { intent: 'price', spanish: /\b(precio|renta)\b/.test(norm) };
+  }
+  if (/\b(tour|visita|cita)\b/.test(norm)) {
+    return { intent: 'tour', spanish: /\b(visita|cita)\b/.test(norm) };
+  }
+  if (/\b(bye|goodbye|goodbye|adios|es todo|thats all|that is all|nada mas)\b/.test(norm)) {
+    return { intent: 'goodbye', spanish: /\b(adios|es todo|nada mas)\b/.test(norm) };
+  }
+  return null;
+}
+
+function loopGuardKeywordReply_(session, intent, isSpanish) {
+  const lines = loopGuardLines_(isSpanish);
+  if (intent === 'message') return lines.message;
+  if (intent === 'office') return officeHandoffLine_(session, isSpanish);
+  if (intent === 'price') return lines.price;
+  if (intent === 'tour') return lines.tour;
+  if (intent === 'goodbye') return lines.bye;
+  return '';
+}
+
+function detectNewLoopSlots_(session, userText) {
+  const found = [];
+  const g = session.loopGuard || ensureLoopGuardState_(session);
+  const slots = g.slots || (g.slots = {});
+  const t = String(userText || '');
+  const flat = normalizeLoopText_(t);
+  const nameNow = extractCallerName(session) || '';
+  if (nameNow && nameNow !== slots.name && !looksUnintelligible_(t)) {
+    slots.name = nameNow;
+    found.push('name');
+  }
+  const nums = (typeof phonesInText_ === 'function') ? phonesInText_(t) : [];
+  if (nums.length) {
+    const n = nums[nums.length - 1];
+    if (n && n !== slots.callback) {
+      slots.callback = n;
+      found.push('callback');
+    }
+  }
+  let unit = '';
+  if (/\b(3|three|tres)\s*(bed(room)?s?|br|recamaras?)\b/.test(flat) || /\b(three bedroom|3 bedroom|tres recamaras?)\b/.test(flat)) unit = '3br';
+  else if (/\b(2|two|dos)\s*(bed(room)?s?|br|recamaras?)\b/.test(flat) || /\b(two bedroom|2 bedroom|dos recamaras?)\b/.test(flat)) unit = '2br';
+  else if (/\b(1|one|una)\s*(bed(room)?s?|br|recamaras?)\b/.test(flat) || /\b(one bedroom|1 bedroom|una recamara)\b/.test(flat)) unit = '1br';
+  if (unit && unit !== slots.unit) {
+    slots.unit = unit;
+    found.push('unit');
+  }
+  let prop = '';
+  if (/\b(windsong|wind song)\b/.test(flat)) prop = 'windsong';
+  else if (/\b(nmfa|nmf|north mountain|foothills)\b/.test(flat)) prop = 'nmfa';
+  if (prop && prop !== slots.property) {
+    slots.property = prop;
+    found.push('property');
+  }
+  if (g.messageFlow) {
+    const keyword = loopGuardKeywordIntent_(t);
+    const norm = normalizeLoopText_(t);
+    if (norm && !keyword && !nameNow && !looksUnintelligible_(t) && norm !== g.lastCallerNorm && loopGuardWordCount_(t) >= 2) {
+      if (!slots.message || slots.message !== t.trim()) {
+        slots.message = String(t).trim().slice(0, 200);
+        found.push('message');
+      }
+    }
+  }
+  return found;
+}
+
+function answersLastLoopQuestion_(session, userText) {
+  const last = lastTurnByRole_(session, 'assistant');
+  if (!last || !/[?¿]/.test(last)) return false;
+  const t = normalizeLoopText_(userText);
+  if (!t) return false;
+  if (/^(yes|yeah|yep|yup|yea|si|sure|ok|okay|correct|claro|perfecto)(\s+(please|por favor|thank you|thanks|gracias))?$/.test(t)) return true;
+  if (/^(no|nope|nah|no thanks|no thank you|no gracias)$/.test(t)) return true;
+  if (/^(yes|yeah|yep|yup|si|sure)\b/.test(t) && !/\b(no|nope|nah)\b/.test(t)) return true;
+  if (loopGuardKeywordIntent_(userText)) return true;
+  if (loopGuardWordCount_(userText) >= 1 && loopGuardWordCount_(userText) <= 6) {
+    if (/\b(price|prices|rent|tour|message|one|two|three|1|2|3|bedroom|recamara|visita|cita|precios|mensaje|office|oficina)\b/.test(t)) return true;
+  }
+  return false;
+}
+
+function broaderLoopIntent_(text) {
+  const t = normalizeLoopText_(text);
+  if (!t) return null;
+  if (loopGuardKeywordIntent_(text)) return loopGuardKeywordIntent_(text).intent;
+  if (/\b(availab|available|vacanc|open unit|hay (algo|unidades|disponibles)|disponib)\b/.test(t)) return 'availability';
+  if (/\b(price|rent|cost|how much|cuanto|precio|renta)\b/.test(t)) return 'price';
+  if (/\b(tour|visit|schedule|cita|visita|recorrido)\b/.test(t)) return 'tour';
+  if (/\b(apply|application|deposit|parking|solicitud|deposito|estacionamiento)\b/.test(t)) return 'availability';
+  if (isBareMessageRequest_(text) || /\b(leave a message|dejar un mensaje)\b/.test(t)) return 'message';
+  if (/\b(agent|human|real person|speak to (someone|a person|an agent)|oficina|agente)\b/.test(t)) return 'office';
+  if (/\b(bye|goodbye|adios|hang up|eso es todo)\b/.test(t)) return 'goodbye';
+  return null;
+}
+
+function classifyLoopCallerTurn_(session, userText) {
+  const g = ensureLoopGuardState_(session);
+  const norm = normalizeLoopText_(userText);
+  const silence = !norm;
+  const keyword = loopGuardKeywordIntent_(userText);
+  const slots = detectNewLoopSlots_(session, userText);
+  const answered = answersLastLoopQuestion_(session, userText);
+  const isRepeat = !!(g.lastCallerNorm && norm && norm === g.lastCallerNorm);
+  const intent = keyword ? keyword.intent : broaderLoopIntent_(userText);
+  let progress = false;
+  if (looksUnintelligible_(userText) && !slots.length) progress = false;
+  else if (slots.length) progress = true;
+  else if (answered && !isRepeat) progress = true;
+  else if (intent && !isRepeat) progress = true;
+  else if (session.languageSwitched && keyword && keyword.spanish) progress = true;
+  return { progress: progress, keyword: keyword, slots: slots, answered: answered, isRepeat: isRepeat, silence: silence, norm: norm, intent: intent };
+}
+
+function logLoopGuardStep_(session, step) {
+  const g = session && session.loopGuard;
+  if (!g) return;
+  const sid = (session && session.callSid) ? String(session.callSid) : 'n/a';
+  console.log('Loop guard step ' + step + ' callSid=' + sid + ' noProgress=' + g.noProgressTurns + ' repeat=' + g.repeatCount + ' leoRepeat=' + g.leoRepeat + ' silence=' + g.silenceTurns + ' userTurns=' + g.userTurns);
+}
+
+function loopGuardElapsedMs_(session, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  const now = loopGuardNow_(session, nowMs);
+  const start = Number(g.callStart) || now;
+  return Math.max(0, now - start);
+}
+
+function userTurnCount_(session) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  let n = 0;
+  for (let i = 0; i < turns.length; i++) {
+    if (turns[i] && turns[i].role === 'user') n++;
+  }
+  return n;
+}
+
+function lastCallerTurns_(session, n) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  const out = [];
+  for (let i = turns.length - 1; i >= 0 && out.length < (n || 3); i--) {
+    if (turns[i] && turns[i].role === 'user') out.unshift(String(turns[i].content || '').trim());
+  }
+  return out;
+}
+
+function buildLoopGuardLeadFields_(session) {
+  const g = ensureLoopGuardState_(session);
+  const confirmed = !!(session.callbackReadback && session.callbackReadback.status === 'confirmed');
+  let phone = session && session.from;
+  if (confirmed) {
+    try {
+      const extracted = extractCallbackNumber_(session);
+      if (extracted) phone = extracted;
+    } catch (e) { phone = session.from; }
+  }
+  const step = (g.exit && g.exit.step) || g.lastStep || 'C';
+  const turns = g.userTurns || userTurnCount_(session);
+  const ms = (g.exit && g.exit.elapsedMs != null) ? g.exit.elapsedMs : loopGuardElapsedMs_(session);
+  const secs = Math.round(ms / 1000);
+  const slotBits = [];
+  const slots = g.slots || {};
+  if (slots.name) slotBits.push('Name: ' + slots.name);
+  if (slots.message) slotBits.push('Message: ' + slots.message);
+  if (slots.callback) slotBits.push('Callback captured: ' + slots.callback);
+  if (slots.unit) slotBits.push('Unit: ' + slots.unit);
+  if (slots.property) slotBits.push('Property: ' + slots.property);
+  const last3 = lastCallerTurns_(session, 3).map(function (t) { return '- ' + t; }).join('\n');
+  let notesPrefix = 'STALLED CALL (guard step ' + step + ', ' + turns + ' turns, ' + secs + ' s)\n';
+  if (slotBits.length) notesPrefix += slotBits.join('\n') + '\n';
+  if (last3) notesPrefix += 'Last caller turns:\n' + last3 + '\n';
+  if (confirmed) {
+    notesPrefix += callbackNotesPrefix_(session, phone);
+  } else {
+    notesPrefix += 'CALLBACK UNCONFIRMED. Inbound caller ID (the number this call came from) was ' + (session && session.from ? session.from : '') + '.\n';
+  }
+  const action = ('CALLBACK REQUESTED: stalled call, team should call back at the number on the lead.').substring(0, 240);
+  return { phone: phone, notesPrefix: notesPrefix, ai_action: action, confirmed: confirmed };
+}
+
+function snapshotLoopGuardLead_(session, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  const fields = buildLoopGuardLeadFields_(session);
+  g.leadSnapshot = {
+    phone: fields.phone,
+    notes: fields.notesPrefix,
+    ai_action: fields.ai_action,
+    step: (g.exit && g.exit.step) || g.lastStep || '',
+    turns: g.userTurns || userTurnCount_(session),
+    elapsedMs: (g.exit && g.exit.elapsedMs != null) ? g.exit.elapsedMs : loopGuardElapsedMs_(session, nowMs)
+  };
+  g.saveRequested = true;
+  return g.leadSnapshot;
+}
+
+function markLoopGuardExit_(session, step, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  g.lastStep = step;
+  g.hungUp = true;
+  g.exit = { step: step, turns: g.userTurns || userTurnCount_(session), elapsedMs: loopGuardElapsedMs_(session, nowMs) };
+  snapshotLoopGuardLead_(session, nowMs);
+  logLoopGuardStep_(session, step);
+  return g.leadSnapshot;
+}
+
+function commitLoopGuardReply_(session, reply, opts) {
+  opts = opts || {};
+  const isSpanish = !!(session && session.isSpanish);
+  let spoken = neverEmptyReply(reply, { isSpanish: isSpanish });
+  session.conversation = session.conversation || [];
+  session.conversation.push({ role: 'assistant', content: spoken });
+  session.replyCommitted = true;
+  return spoken;
+}
+
+function maybePrependSoftCap_(session, reply, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  if (g.softCapSpoken || g.hungUp) return reply;
+  const caps = loopGuardCaps_(session);
+  if (loopGuardElapsedMs_(session, nowMs) < caps.LOOP_SOFT_CAP_MS) return reply;
+  if (inActiveCallbackReadback_(session)) return reply;
+  g.softCapSpoken = true;
+  logLoopGuardStep_(session, 'D-soft');
+  const line = loopGuardLines_(!!(session && session.isSpanish)).soft;
+  const body = String(reply || '').trim();
+  if (!body) return line;
+  if (normalizeLoopText_(body) === normalizeLoopText_(line)) return body;
+  return line + ' ' + body;
+}
+
+function nextLoopGuardLadderReply_(session, prefer, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  let step = prefer || 'B';
+  if (g.lastStep === 'B' || g.lastStep === 'C' || g.messageFlow && prefer === 'B' && g.noProgressTurns >= 5) {
+    if (prefer === 'C' || g.noProgressTurns >= 5 || (g.lastStep === 'B' && g.silenceTurns >= 2) || g.lastStep === 'B' && prefer === 'B') {
+      step = 'C';
+    }
+  }
+  if (step === 'A' && (g.lastStep === 'A' || g.noProgressTurns >= 3 || g.repeatCount >= 2)) step = 'B';
+  if (step === 'B' && (g.lastStep === 'B' && wouldBeThirdLeoRepeat_(session, lines.B))) step = 'C';
+  if (step === 'C') {
+    g.lastStep = 'C';
+    return { step: 'C', reply: lines.C, hangUp: true };
+  }
+  if (step === 'B') {
+    g.lastStep = 'B';
+    g.messageFlow = true;
+    return { step: 'B', reply: lines.B, hangUp: false };
+  }
+  g.lastStep = 'A';
+  return { step: 'A', reply: lines.A, hangUp: false };
+}
+
+function applyLeoRepeatGuard_(session, reply, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  if (!wouldBeThirdLeoRepeat_(session, reply)) {
+    g.leoRepeat = 0;
+    return { reply: reply, replaced: false, hangUp: false, step: null };
+  }
+  g.leoRepeat = (g.leoRepeat || 0) + 1;
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  // A slow but engaged caller (progress this turn, counters at 0) must not be
+  // cut off before the hard cap just because the model repeated itself.
+  const engaged = g.noProgressTurns === 0;
+  if (g.lastStep === 'B' && !engaged) {
+    logLoopGuardStep_(session, 'leoRepeat->C');
+    return { reply: lines.C, replaced: true, hangUp: true, step: 'C' };
+  }
+  logLoopGuardStep_(session, 'leoRepeat->B');
+  g.lastStep = g.lastStep === 'C' ? 'C' : 'B';
+  g.messageFlow = true;
+  return { reply: lines.B, replaced: true, hangUp: false, step: 'B' };
+}
+
+function finishLoopGuardHangup_(session, step, reply, nowMs) {
+  const spoken = commitLoopGuardReply_(session, reply, {});
+  markLoopGuardExit_(session, step, nowMs);
+  return { spoken: spoken, intercepted: 'loop_guard_' + step, hungUp: true, leadSnapshot: session.loopGuard.leadSnapshot };
+}
+
+function noteLoopGuardProgress_(session, reason) {
+  const g = ensureLoopGuardState_(session);
+  g.noProgressTurns = 0;
+  g.repeatCount = 0;
+  g.silenceTurns = 0;
+  g.lastProgressReason = reason || 'progress';
+}
+
+function runLoopGuardTurn_(session, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  if (g.hungUp) return { spoken: '', intercepted: 'loop_guard_ended', hungUp: true, leadSnapshot: g.leadSnapshot };
+  const userText = lastTurnByRole_(session, 'user');
+  g.userTurns = userTurnCount_(session);
+  const classified = classifyLoopCallerTurn_(session, userText);
+  if (classified.silence) g.silenceTurns += 1;
+  else g.silenceTurns = 0;
+  if (classified.isRepeat) g.repeatCount += 1;
+  else g.repeatCount = 0;
+  g.lastCallerNorm = classified.norm || g.lastCallerNorm;
+  if (classified.progress) noteLoopGuardProgress_(session, classified.intent || 'slot');
+  else g.noProgressTurns += 1;
+
+  const isSpanish = !!(session && session.isSpanish);
+  const lines = loopGuardLines_(isSpanish);
+
+  // Keyword shortcut, only the first time that keyword starts a flow.
+  // A repeated "Message" with no new slot is no-progress, not a fresh start.
+  if (classified.keyword && classified.progress) {
+    if (classified.keyword.spanish && session && !session.isSpanish) session.isSpanish = true;
+    const replyLang = !!(session && session.isSpanish);
+    const raw = loopGuardKeywordReply_(session, classified.keyword.intent, replyLang);
+    if (classified.keyword.intent === 'message') g.messageFlow = true;
+    if (classified.keyword.intent === 'goodbye') {
+      const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, raw, nowMs), {});
+      // Willing close still saves the lead, but it is not a stalled-call exit.
+      g.saveRequested = true;
+      g.hungUp = true;
+      g.lastStep = 'goodbye';
+      logLoopGuardStep_(session, 'keyword_goodbye');
+      return { spoken: spoken, intercepted: 'loop_guard_keyword_goodbye', hungUp: true, leadSnapshot: null };
+    }
+    const guarded = applyLeoRepeatGuard_(session, raw, nowMs);
+    if (guarded.hangUp) return finishLoopGuardHangup_(session, guarded.step || 'C', guarded.reply, nowMs);
+    const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, guarded.reply, nowMs), {});
+    logLoopGuardStep_(session, 'keyword_' + classified.keyword.intent);
+    if (classified.keyword.intent === 'message') g.lastStep = g.lastStep || 'keyword_message';
+    return { spoken: spoken, intercepted: 'loop_guard_keyword_' + classified.keyword.intent, hungUp: false };
+  }
+
+  // Step C: 5 no-progress turns, or 2 silence turns after step B.
+  if (g.noProgressTurns >= 5 || (g.lastStep === 'B' && g.silenceTurns >= 2)) {
+    return finishLoopGuardHangup_(session, 'C', lines.C, nowMs);
+  }
+
+  // Repeats, or 3 no-progress turns: step B, once. (repeats jump straight to B)
+  const alreadyB = (g.lastStep === 'B' || g.lastStep === 'C' || g.lastStep === 'D');
+  if (!alreadyB && (g.noProgressTurns >= 3 || g.repeatCount >= 2)) {
+    const next = nextLoopGuardLadderReply_(session, 'B', nowMs);
+    if (next.hangUp) return finishLoopGuardHangup_(session, next.step, next.reply, nowMs);
+    const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, next.reply, nowMs), {});
+    logLoopGuardStep_(session, next.step);
+    return { spoken: spoken, intercepted: 'loop_guard_' + next.step, hungUp: false };
+  }
+
+  // 2 no-progress turns: step A, once, unless a later step already ran.
+  const alreadyA = alreadyB || g.lastStep === 'A';
+  if (!alreadyA && g.noProgressTurns >= 2) {
+    const next = nextLoopGuardLadderReply_(session, 'A', nowMs);
+    if (next.hangUp) return finishLoopGuardHangup_(session, next.step, next.reply, nowMs);
+    const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, next.reply, nowMs), {});
+    logLoopGuardStep_(session, next.step);
+    return { spoken: spoken, intercepted: 'loop_guard_' + next.step, hungUp: false };
+  }
+
+  // In message flow with a no-progress turn that has not hit a ladder step yet:
+  // re-ask the name instead of falling back to "How can I help?"
+  if (g.messageFlow && !classified.progress) {
+    const reask = lines.nameAgain;
+    const guarded = applyLeoRepeatGuard_(session, reask, nowMs);
+    if (guarded.hangUp) return finishLoopGuardHangup_(session, guarded.step || 'C', guarded.reply, nowMs);
+    const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, guarded.reply, nowMs), {});
+    return { spoken: spoken, intercepted: 'loop_guard_name_reask', hungUp: false };
+  }
+
+  return null;
+}
+
+function maybeLoopGuardHardCap_(session, nowMs) {
+  const g = ensureLoopGuardState_(session, nowMs);
+  if (g.hungUp) return { spoken: '', intercepted: 'loop_guard_ended', hungUp: true, leadSnapshot: g.leadSnapshot };
+  const caps = loopGuardCaps_(session);
+  if (loopGuardElapsedMs_(session, nowMs) < caps.LOOP_HARD_CAP_MS) return null;
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  return finishLoopGuardHangup_(session, 'D', lines.C, nowMs);
+}
+
+function interceptAfterUserTurn_(session, opts) {
+  opts = opts || {};
+  const nowMs = loopGuardNow_(session, opts.nowMs);
+  ensureLoopGuardState_(session, nowMs);
+  if (session.loopGuard && session.loopGuard.hungUp) {
+    return { spoken: '', intercepted: 'loop_guard_ended', hungUp: true, leadSnapshot: session.loopGuard.leadSnapshot };
+  }
+  const hard = maybeLoopGuardHardCap_(session, nowMs);
+  if (hard) return hard;
+  // v38 read-back first, including mid-confirm "no" / repeat-the-number turns,
+  // so the 2-attempt cap is not overridden by the loop guard.
+  const cbSpoken = maybeScriptedCallbackReply_(session);
+  if (cbSpoken) {
+    noteLoopGuardProgress_(session, 'callback_readback');
+    const g = session.loopGuard;
+    if (g) {
+      g.userTurns = userTurnCount_(session);
+      const norm = normalizeLoopText_(lastTurnByRole_(session, 'user'));
+      if (norm) g.lastCallerNorm = norm;
+    }
+    return { spoken: cbSpoken, intercepted: 'callback_readback', hungUp: false };
+  }
+  const guard = runLoopGuardTurn_(session, nowMs);
+  if (guard) return guard;
+  return null;
+}
+
+function sendConversationRelayEnd_(ws) {
+  if (!ws || typeof ws.send !== 'function') return false;
+  try {
+    ws.send(JSON.stringify({ type: 'end' }));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function maybePostAndHangUpFromGuard_(session, ws, result) {
+  if (!result || !session) return;
+  if (result.hungUp && session.loopGuard) {
+    session.loopGuard.saveRequested = true;
+    try { await postLeadToDashboard(session); } catch (e) { console.error('Lead post error:', e && e.message ? e.message : e); }
+    sendConversationRelayEnd_(ws);
+  }
+}
+
+
+// ============================================================
 // GENERATE CALL SUMMARY + ACTION RECOMMENDATION
 // ============================================================
 // At end-of-call, we ask Claude Haiku to produce two things:
 //   1. ai_summary: 2-3 sentence recap of what the caller wanted, what was
 //      discussed, and what was committed. Written for the leasing agent.
 //   2. ai_action: one-line recommendation for what the human agent should
-//      do next ("Send tour link", "Call back to confirm tour for Saturday",
+//      do next ("Send tour link", "Call back to confirm tour for the weekend",
 //      "Add to waitlist for 2BR", "No follow-up needed — caller declined").
 //
 // We use Claude (not a template) here because the call content is open-ended
@@ -2378,7 +3657,7 @@ function buildCallSummaryPrompt_(session, callerName, propertyName, transcript) 
 - What they want: a few plain words (the unit size, the question, the issue). Include a commitment made (tour link sent, application link sent, callback expected) only if the AI really made it.
 - NO PII in the line. No last names, no phone numbers (the lead row already has the caller ID), no email addresses, no street addresses, no account, card or ID numbers. A unit number is fine for maintenance. Do not include filler.
 
-PRICES IN THE SUMMARY: the transcript contains prices spoken as words. Convert each to its correct dollar figure: "nine ninety five" is $995, "eleven hundred" is $1,100, "twelve ninety five" is $1,295, "fourteen hundred" is $1,400, "fifteen hundred" is $1,500, "sixteen hundred fifty" is $1,650, "seventeen fifty" is $1,750, "eighteen hundred" is $1,800, "one thousand" is $1,000. The same figures may appear spelled out in full ("one thousand, two hundred ninety five dollars"); treat those identically. NEVER write a monthly rent or deposit as a cents or decimal amount such as $12.95 or $17.50; those are wrong by a factor of one hundred. If the caller stated a price that conflicts with what the AI said, record the AI figure, never the caller figure.
+PRICES IN THE SUMMARY: convert only current listed rents from spoken words to dollar figures: "thirteen hundred" or "one thousand three hundred" is $1,300, "twelve ninety five" or "one thousand, two hundred ninety five dollars" is $1,295, "fifteen hundred" or "one thousand five hundred" is $1,500, "eighteen hundred" or "one thousand eight hundred" is $1,800. The same current figures may appear spelled out in full; treat those identically. NEVER write a monthly rent or deposit as a cents or decimal amount such as $12.95 or $15.00; those are wrong by a factor of one hundred. If the transcript contains any other figure (including a retired or unrecognized price), write it as-is, as spoken, or flag it as "unlisted price (as spoken: ...)" — do not convert it to a dollar amount as if it were a current rent. If the caller stated a price that conflicts with what the AI said, record the AI figure when it is a current listed price; if the AI corrected an unlisted figure, record the current listed price the AI gave and you may note that the caller mentioned an unlisted figure.
 
 "action" must be ONE short sentence describing what the human leasing agent should do next. Examples: "Send tour link via text", "Follow up tomorrow to confirm tour booking", "Add to waitlist for 2 bedroom", "No follow-up needed, caller declined", "Verify Section 8 voucher status before tour", "Confirm move-in date and start application". Never use a dash as punctuation in either field.
 
@@ -2482,12 +3761,14 @@ async function postLeadToDashboard(session) {
     const extracted = extractCallbackNumber_(session);
     if (extracted) storedPhone = extracted;
   } catch (e) { storedPhone = session.from; }
-  const callbackDiffers = (function () {
-    const a = normalizeUsPhone_(storedPhone), b = normalizeUsPhone_(session.from);
-    return !!(a && b && a !== b);
-  })();
-  let summary = (callbackDiffers ? ('CALLBACK NUMBER GIVEN: ' + storedPhone + '. Inbound caller ID (the number this call came from) was ' + session.from + '.\n') : '') +
+  let summary = callbackNotesPrefix_(session, storedPhone) +
     `Voice call to ${session.property?.short || 'property'} from ${session.from}\n\n${lines.substring(0, 15000)}`;
+  if (session.loopGuard && session.loopGuard.exit) {
+    const guardFields = buildLoopGuardLeadFields_(session);
+    storedPhone = guardFields.phone;
+    summary = guardFields.notesPrefix + summary;
+    session.loopGuard._leadFields = guardFields;
+  }
 
   // Generate the AI summary + action in parallel-ish with the network call.
   // Awaiting here adds ~1-2s to the post-call writeback, which is fine
@@ -2592,6 +3873,9 @@ async function postLeadToDashboard(session) {
   if (humanAsk && !/CALLBACK REQUESTED/i.test(ai_action_final || '')) {
     const detail = (ai_action_final && !/no follow.?up/i.test(ai_action_final)) ? ' ' + ai_action_final : ' Caller asked for a person; see transcript for the reason.';
     ai_action_final = ('CALLBACK REQUESTED:' + detail).substring(0, 240);
+  }
+  if (session.loopGuard && session.loopGuard.exit && session.loopGuard._leadFields) {
+    ai_action_final = session.loopGuard._leadFields.ai_action;
   }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
@@ -2703,7 +3987,7 @@ function detectSmsIntent(text) {
 //
 // Some factual questions ("what are your hours?") must be answered
 // deterministically. Haiku has been observed hallucinating prior
-// hours strings ("10 AM to 5 PM, closed on weekends") even when
+// hours strings (a prior schedule, closed on weekends) even when
 // the system prompt explicitly forbids that paraphrase and pins
 // the canonical string. Routing these questions through a fixed
 // template eliminates the LLM lottery for high-stakes facts and
@@ -2746,9 +4030,9 @@ function buildFactualReply(intent, property, isSpanish) {
   if (intent === 'hours') {
     if (isSpanish) {
       const esHours = property.hours_es || property.hours;
-      return `El horario de la oficina es ${esHours}. ¿Desea que le envíe el enlace para reservar un recorrido?`;
+      return formatHoursStatement_(esHours, 'es') + ' ¿Desea que le envíe el enlace para reservar un recorrido?';
     }
-    return `Our office hours are ${property.hours}. Would you like me to send you the tour link?`;
+    return formatHoursStatement_(property.hours, 'en') + ' Would you like me to send you the tour link?';
   }
   return null;
 }
@@ -2827,7 +4111,7 @@ function buildRelayTwiml_(host, greeting) {
   <Connect>
     <ConversationRelay
       url="wss://${host}/ws"
-      welcomeGreeting="${greeting}"
+      welcomeGreeting="${speakMattgab_(greeting)}"
       voice="Lrd8QHYUxHOQgV6Kbgy4"
       ttsProvider="ElevenLabs"
       language="en-US"
@@ -2856,7 +4140,7 @@ fastify.post('/voice', async (request, reply) => {
   const to = request.body?.To || '';
   const from = request.body?.From || '';
   const property = PROPERTIES[to];
-  const greeting = property ? property.greeting_en : 'Thank you for calling Mattgab Management. How can I help you today?';
+  const greeting = property ? property.greeting_en : 'Thank you for calling Matt Gab Management. How can I help you today?';
 
   // WS URL uses the same host as the inbound request so staging and production
   // each connect to their own WebSocket. Avoids cross-environment leakage when
@@ -2894,10 +4178,11 @@ fastify.register(async function(fastify) {
           // (hours intercept, escalation prompt, pricing) stays in sync.
           const content = await loadContent();
           const cp = content.properties[baseProperty.key] || DEFAULT_CONTENT.properties[baseProperty.key];
+          const usingStoreFallback = isUsingFallbackContent(content);
           const property = {
             ...baseProperty,
-            hours: cp.hours_en,
-            hours_es: cp.hours_es,
+            hours: hoursFor(baseProperty, 'en', { store: cp.hours_en, usingFallback: usingStoreFallback }),
+            hours_es: hoursFor(baseProperty, 'es', { store: cp.hours_es, usingFallback: usingStoreFallback }),
             units: renderUnitsBlock(baseProperty.key, content)
           };
 
@@ -2967,10 +4252,30 @@ fastify.register(async function(fastify) {
           session.replyCommitted = false;
           session.conversation.push({ role: 'user', content: text });
 
+          // PRE-LLM INTERCEPT: v38 callback read-back first (2-attempt cap),
+          // then the v39 loop guard (keywords, stall ladder, time caps).
+          const intercepted = interceptAfterUserTurn_(session, {});
+          if (intercepted) {
+            if (session.isSpanish && !session.languageSwitched) {
+              session.languageSwitched = true;
+              session.spanishVoiceAttempt = 0;
+              session.spanishSwitchAt = Date.now();
+              ws.send(JSON.stringify(buildSpanishLanguageMessage_(0)));
+            }
+            if (intercepted.spoken) {
+              console.log((intercepted.intercepted || 'guard') + ' intercepted');
+              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(intercepted.spoken, session.isSpanish), last: true }));
+            }
+            if (intercepted.hungUp) {
+              await maybePostAndHangUpFromGuard_(session, ws, intercepted);
+            }
+            break;
+          }
+
           // PRE-LLM INTERCEPT for hard-to-LLM factual questions (hours).
           // Skip the Claude round-trip and answer with the canonical string.
           // Haiku has been observed hallucinating prior-version hours strings
-          // ("10 AM to 5 PM, closed on weekends") despite explicit prompt rules
+          // (a prior schedule, closed on weekends) despite explicit prompt rules
           // forbidding it. This guarantees correctness for high-stakes facts.
           const factualIntent = detectFactualIntent(text);
           if (factualIntent) {
@@ -3013,6 +4318,14 @@ fastify.register(async function(fastify) {
               if (session.activeStream !== stream) return;
               session.activeStream = null;
               session.pendingBufferedTurn = '';
+              const guardedModel = applyLeoRepeatGuard_(session, fullResponse, Date.now());
+              if (guardedModel.hangUp) {
+                const ended = finishLoopGuardHangup_(session, guardedModel.step || 'C', guardedModel.reply, Date.now());
+                ws.send(JSON.stringify({ type: 'text', token: speakableReply_(ended.spoken, session.isSpanish), last: true }));
+                await maybePostAndHangUpFromGuard_(session, ws, ended);
+                return;
+              }
+              fullResponse = maybePrependSoftCap_(session, guardedModel.reply, Date.now());
               const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
               const spoken = commitAssistantReply(session, fullResponse, {
                 property: session.property,
@@ -3043,9 +4356,9 @@ fastify.register(async function(fastify) {
                   if (intent === 'tour') {
                     await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${property.tour_link}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
                   } else if (intent === 'apply') {
-                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our Community Manager will be in touch within 1 business day! Reply STOP to unsubscribe.`);
+                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our leasing team will follow up with you. Reply STOP to unsubscribe.`);
                   } else if (intent === 'portal') {
-                    await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor emergencies call ${property.phone} — after hours follow prompts for on-call technician. Reply STOP to unsubscribe.`);
+                    await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor maintenance emergencies call ${MAINTENANCE_EMERGENCY}. Reply STOP to unsubscribe.`);
                   }
                 }
               }
@@ -3082,7 +4395,7 @@ fastify.register(async function(fastify) {
               session.pendingBufferedTurn = '';
               console.error('Claude stream error:', error.message);
               const fallback = session.isSpanish
-                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
+                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
                 : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
               ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
             });
@@ -3090,7 +4403,7 @@ fastify.register(async function(fastify) {
           } catch (err) {
             console.error('Claude error:', err.message);
             const fallback = session.isSpanish
-              ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone
+              ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
               : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
             ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
           }
