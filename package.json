@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test check-lead-headers.js"
+    "test": "node --test check-lead-headers.js check-v36.js"
   },
   "dependencies": {
     "fastify": "^4.28.1",
