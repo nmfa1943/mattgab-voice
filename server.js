@@ -3622,6 +3622,259 @@ async function maybePostAndHangUpFromGuard_(session, ws, result) {
   }
 }
 
+// ============================================================
+// PASS 17: CALL LIMITS (silence watchdog, max call length, upstream failure)
+// ============================================================
+// Why: call CAeb40f6... (WindSong on staging, Nov 18 2026) stayed connected
+// 3h05m. Leo's line "Let me take a message ... What's your first name?" hit a
+// ConversationRelay TTS error (64111), the caller went quiet, and nothing in
+// this server ever ended a quiet call: no silence timer, no max length, and the
+// 10 s WebSocket ping kept the session alive. The TwiML has no action URL, so
+// the call lasted as long as /ws stayed open.
+//
+// What this adds (all env-configurable, safe defaults):
+// - Silence: no caller prompt/interrupt/dtmf and no Leo text for
+//   CALL_SILENCE_PROMPT_MS (30 s) -> Leo says "Are you still there?" once
+//   (EN/ES). Still nothing for CALL_SILENCE_HANGUP_MS (20 s) -> short goodbye,
+//   then end the call. The timer pauses while Leo is generating a reply.
+// - Max length: CALL_MAX_DURATION_MS (20 min) -> polite goodbye, end the call.
+//   Second layer: at setup the call's Twilio timeLimit is set to the max length
+//   plus CALL_REST_TIME_LIMIT_PAD_S (60 s), so Twilio itself drops the call even
+//   if this process stalls (CALL_REST_TIME_LIMIT=false turns that off).
+// - Upstream AI failure: a Claude stream error, an exception starting the
+//   stream, or a reply that takes longer than CALL_LLM_TURN_TIMEOUT_MS (20 s)
+//   -> apology with the office number, then end the call (no open line).
+// Ending a call = ConversationRelay {type:'end'} (the documented way; no action
+// URL means Twilio has no next verb and hangs up), then REST
+// calls(sid).update({status:'completed'}) as backup, then close the WebSocket.
+// Every forced hang-up logs "Forced hang-up: reason=<silence|max_length|
+// upstream_closed> ... callSid=<sid>". Credentials are never logged.
+// CALL_LIMITS_ENABLED=false turns the whole watchdog off (pre-pass-17 behaviour).
+function callLimitEnvInt_(name, def, min) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return def;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < min) {
+    console.warn(`Call limits: ignoring ${name}=${raw} (must be a number >= ${min}); using ${def}`);
+    return def;
+  }
+  return n;
+}
+const CALL_LIMITS_ENABLED       = process.env.CALL_LIMITS_ENABLED !== 'false';
+const CALL_SILENCE_PROMPT_MS    = callLimitEnvInt_('CALL_SILENCE_PROMPT_MS', 30000, 5000);
+const CALL_SILENCE_HANGUP_MS    = callLimitEnvInt_('CALL_SILENCE_HANGUP_MS', 20000, 5000);
+const CALL_MAX_DURATION_MS      = callLimitEnvInt_('CALL_MAX_DURATION_MS', 20 * 60 * 1000, 60000);
+const CALL_LLM_TURN_TIMEOUT_MS  = callLimitEnvInt_('CALL_LLM_TURN_TIMEOUT_MS', 20000, 5000);
+const CALL_HANGUP_GRACE_MS      = callLimitEnvInt_('CALL_HANGUP_GRACE_MS', 7000, 0);
+const CALL_WS_CLOSE_DELAY_MS    = callLimitEnvInt_('CALL_WS_CLOSE_DELAY_MS', 1500, 0);
+const CALL_WATCHDOG_TICK_MS     = callLimitEnvInt_('CALL_WATCHDOG_TICK_MS', 1000, 200);
+const CALL_REST_TIME_LIMIT      = process.env.CALL_REST_TIME_LIMIT !== 'false';
+const CALL_REST_TIME_LIMIT_PAD_S = callLimitEnvInt_('CALL_REST_TIME_LIMIT_PAD_S', 60, 0);
+
+const CALL_LIMIT_LINES = {
+  still_there: {
+    en: 'Are you still there?',
+    es: '¿Sigue ahí?'
+  },
+  silence: {
+    en: "I haven't heard anything, so I'll end the call now. Please call us back anytime. Goodbye.",
+    es: 'No he escuchado nada, así que voy a terminar la llamada. Puede llamarnos cuando guste. Adiós.'
+  },
+  max_length: {
+    en: "We've reached the time limit for this call. Please call us back anytime if you need more help. Goodbye.",
+    es: 'Hemos llegado al límite de tiempo de esta llamada. Puede volver a llamarnos cuando guste. Adiós.'
+  }
+};
+
+function callLimitLine_(kind, session) {
+  const es = !!(session && session.isSpanish);
+  if (kind === 'upstream_closed') {
+    const phone = (session && session.property && session.property.phone) || '';
+    return es
+      ? 'Lo siento, tuve un problema técnico. Por favor llame a nuestra oficina' + (phone ? ' al ' + phone : '') + '. Adiós.'
+      : "I'm sorry, I had a technical issue. Please call our office" + (phone ? ' at ' + phone : '') + '. Goodbye.';
+  }
+  const l = CALL_LIMIT_LINES[kind];
+  return l ? (es ? l.es : l.en) : '';
+}
+
+function initCallLimits_(session, nowMs) {
+  if (!session) return null;
+  session.callLimits = {
+    startedAt: nowMs,
+    lastActivityAt: nowMs,
+    stillTherePromptedAt: null,
+    ending: false,
+    endReason: null
+  };
+  return session.callLimits;
+}
+
+// Caller prompt / interrupt / dtmf, or Leo sending text, counts as activity.
+function noteCallActivity_(session, nowMs) {
+  const c = session && session.callLimits;
+  if (!c || c.ending) return;
+  c.lastActivityAt = nowMs;
+  c.stillTherePromptedAt = null;
+}
+
+// Pure decision. Returns null, {action:'still_there'} or
+// {action:'hangup', reason, detail}.
+function evaluateCallLimits_(session, nowMs, cfg) {
+  cfg = cfg || {};
+  const c = session && session.callLimits;
+  if (!c || c.ending) return null;
+  const maxMs = cfg.maxMs != null ? cfg.maxMs : CALL_MAX_DURATION_MS;
+  const promptMs = cfg.silencePromptMs != null ? cfg.silencePromptMs : CALL_SILENCE_PROMPT_MS;
+  const hangMs = cfg.silenceHangupMs != null ? cfg.silenceHangupMs : CALL_SILENCE_HANGUP_MS;
+  const llmMs = cfg.llmTurnTimeoutMs != null ? cfg.llmTurnTimeoutMs : CALL_LLM_TURN_TIMEOUT_MS;
+  if (nowMs - c.startedAt >= maxMs) return { action: 'hangup', reason: 'max_length', detail: Math.round((nowMs - c.startedAt) / 1000) + 's' };
+  if (session.activeStream) {
+    const since = session.activeStreamStartedAt || c.lastActivityAt;
+    if (nowMs - since >= llmMs) return { action: 'hangup', reason: 'upstream_closed', detail: 'llm_turn_timeout' };
+    return null; // Leo is still generating; silence timer pauses.
+  }
+  if (c.stillTherePromptedAt == null) {
+    if (nowMs - c.lastActivityAt >= promptMs) return { action: 'still_there' };
+    return null;
+  }
+  if (nowMs - c.stillTherePromptedAt >= hangMs) return { action: 'hangup', reason: 'silence', detail: Math.round((nowMs - c.lastActivityAt) / 1000) + 's quiet' };
+  return null;
+}
+
+function relaySocketOpen_(ws) {
+  if (!ws) return false;
+  if (typeof ws.readyState === 'number' && typeof ws.OPEN === 'number') return ws.readyState === ws.OPEN;
+  return true;
+}
+
+// Send without counting as activity (used for the watchdog's own lines).
+function sendRelayRaw_(ws, obj) {
+  if (!relaySocketOpen_(ws)) return false;
+  try {
+    const send = typeof ws._rawSend === 'function' ? ws._rawSend : ws.send.bind(ws);
+    send(JSON.stringify(obj));
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Every outgoing ConversationRelay text from Leo resets the silence timer.
+function instrumentRelaySocket_(ws, getSession, now) {
+  if (!ws || typeof ws.send !== 'function' || ws._rawSend) return ws;
+  now = now || Date.now;
+  const raw = ws.send.bind(ws);
+  ws._rawSend = raw;
+  ws.send = function (data) {
+    try {
+      if (typeof data === 'string' && data.indexOf('"type":"text"') !== -1) noteCallActivity_(getSession(), now());
+    } catch (e) { /* never block a send */ }
+    return raw.apply(null, arguments);
+  };
+  return ws;
+}
+
+function sayStillThere_(session, ws, nowMs) {
+  const c = session && session.callLimits;
+  if (!c || c.ending) return false;
+  c.stillTherePromptedAt = nowMs;
+  const line = callLimitLine_('still_there', session);
+  console.log(`Silence watchdog: asked "${line}" callSid=${session.callSid || 'unknown'}`);
+  sendRelayRaw_(ws, { type: 'text', token: line, last: true });
+  if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: line });
+  return true;
+}
+
+// Speak a goodbye, then end the session (end message), complete the call over
+// REST as backup, then close the WebSocket. Idempotent per call.
+function forceHangup_(session, ws, reason, detail, deps) {
+  deps = deps || {};
+  const later = deps.setTimeout || setTimeout;
+  const graceMs = deps.graceMs != null ? deps.graceMs : CALL_HANGUP_GRACE_MS;
+  const closeDelayMs = deps.closeDelayMs != null ? deps.closeDelayMs : CALL_WS_CLOSE_DELAY_MS;
+  const client = deps.twilioClient !== undefined ? deps.twilioClient : (typeof twilioClient !== 'undefined' ? twilioClient : null);
+  const log = deps.log || console;
+  if (!session) return Promise.resolve(false);
+  if (!session.callLimits) initCallLimits_(session, Date.now());
+  const c = session.callLimits;
+  if (c.ending) return Promise.resolve(false);
+  c.ending = true;
+  c.endReason = reason;
+  const sid = session.callSid || (ws && ws.callSid) || 'unknown';
+  log.warn(`Forced hang-up: reason=${reason}${detail ? ' detail=' + detail : ''} callSid=${sid}`);
+
+  // Stop any reply still generating; clear first so its abort handler is a no-op.
+  const stream = session.activeStream;
+  session.activeStream = null;
+  session.pendingBufferedTurn = '';
+  if (stream && typeof stream.abort === 'function') { try { stream.abort(); } catch (e) { /* already ended */ } }
+
+  const line = callLimitLine_(reason, session);
+  if (line) {
+    sendRelayRaw_(ws, { type: 'text', token: speakableReply_(line, session.isSpanish), last: true });
+    if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: line });
+  }
+
+  return new Promise((resolve) => {
+    later(async () => {
+      sendRelayRaw_(ws, { type: 'end', handoffData: JSON.stringify({ reasonCode: 'forced-hangup', reason: reason }) });
+      let rest = 'skipped';
+      if (client && typeof client.calls === 'function' && /^CA[0-9a-f]{32}$/i.test(String(sid))) {
+        try {
+          await client.calls(sid).update({ status: 'completed' });
+          rest = 'completed';
+        } catch (e) {
+          rest = 'error ' + ((e && (e.code || e.status)) || '') ; // message may echo request data; code only
+        }
+      }
+      log.warn(`Forced hang-up: end sent, REST ${rest}, closing socket callSid=${sid}`);
+      later(() => {
+        try { if (ws && typeof ws.close === 'function') ws.close(); } catch (e) { /* already closed */ }
+        resolve(true);
+      }, closeDelayMs);
+    }, graceMs);
+  });
+}
+
+// Second layer: ask Twilio to drop the call itself shortly after the max length.
+function applyTwilioTimeLimit_(callSid, deps) {
+  deps = deps || {};
+  const client = deps.twilioClient !== undefined ? deps.twilioClient : (typeof twilioClient !== 'undefined' ? twilioClient : null);
+  const enabled = deps.enabled != null ? deps.enabled : (CALL_LIMITS_ENABLED && CALL_REST_TIME_LIMIT);
+  const maxMs = deps.maxMs != null ? deps.maxMs : CALL_MAX_DURATION_MS;
+  const padS = deps.padS != null ? deps.padS : CALL_REST_TIME_LIMIT_PAD_S;
+  const log = deps.log || console;
+  if (!enabled || !client || typeof client.calls !== 'function' || !/^CA[0-9a-f]{32}$/i.test(String(callSid || ''))) return Promise.resolve(null);
+  const timeLimit = Math.ceil(maxMs / 1000) + padS;
+  return Promise.resolve()
+    .then(() => client.calls(callSid).update({ timeLimit: timeLimit }))
+    .then(() => { log.log(`Call time limit set: ${timeLimit}s callSid=${callSid}`); return timeLimit; })
+    .catch((e) => { log.warn(`Call time limit not set (code ${(e && (e.code || e.status)) || 'unknown'}) callSid=${callSid}`); return null; });
+}
+
+// One watchdog per WebSocket. Returns a stop() function.
+function startCallWatchdog_(ws, getSession, deps) {
+  deps = deps || {};
+  const now = deps.now || Date.now;
+  const every = deps.setInterval || setInterval;
+  const stopEvery = deps.clearInterval || clearInterval;
+  const tickMs = deps.tickMs || CALL_WATCHDOG_TICK_MS;
+  const timer = every(() => {
+    try {
+      const session = getSession();
+      if (!session) return;
+      const decision = evaluateCallLimits_(session, now(), deps.cfg);
+      if (!decision) return;
+      if (decision.action === 'still_there') sayStillThere_(session, ws, now());
+      else if (decision.action === 'hangup') forceHangup_(session, ws, decision.reason, decision.detail, deps);
+    } catch (e) {
+      console.error('Call watchdog error:', e && e.message ? e.message : e);
+    }
+  }, tickMs);
+  return function stop() { try { stopEvery(timer); } catch (e) { /* ignore */ } };
+}
+
 
 // ============================================================
 // GENERATE CALL SUMMARY + ACTION RECOMMENDATION
@@ -4207,12 +4460,22 @@ fastify.register(async function(fastify) {
           });
           ws.callSid = callSid;
           console.log(`Call started: ${callSid} To:${to} From:${from} Property:${property.short}`);
+          // Pass 17: silence watchdog, max call length, Twilio timeLimit backstop.
+          if (CALL_LIMITS_ENABLED) {
+            initCallLimits_(sessions.get(callSid), Date.now());
+            instrumentRelaySocket_(ws, () => sessions.get(ws.callSid));
+            if (!ws._stopCallWatchdog) ws._stopCallWatchdog = startCallWatchdog_(ws, () => sessions.get(ws.callSid));
+            applyTwilioTimeLimit_(callSid);
+          }
           break;
         }
 
         case 'prompt': {
           const session = sessions.get(ws.callSid);
           if (!session) break;
+          // Pass 17: once a forced hang-up has started, do not start a new reply.
+          if (session.callLimits && session.callLimits.ending) { console.log(`Caller said (ignored, call ending): ${msg.voicePrompt || ''}`); break; }
+          noteCallActivity_(session, Date.now());   // pass 17: caller spoke
           // If a previous turn is still generating, abort it and drop any
           // unspoken buffered text so a mid-generation "hello?" cannot
           // start a second stream on the same session.
@@ -4306,6 +4569,7 @@ fastify.register(async function(fastify) {
               messages: session.conversation.slice(1),
             });
             session.activeStream = stream;
+            session.activeStreamStartedAt = Date.now();   // pass 17: reply timeout
             session.pendingBufferedTurn = '';
 
             // Buffer the turn, then sanitize (greeting / hours / repeated sentences)
@@ -4399,6 +4663,8 @@ fastify.register(async function(fastify) {
               session.activeStream = null;
               session.pendingBufferedTurn = '';
               console.error('Claude stream error:', error.message);
+              // Pass 17: the AI is gone for this turn - apologise with the office number and end the call.
+              if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_error'); return; }
               const fallback = session.isSpanish
                 ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
                 : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
@@ -4407,6 +4673,7 @@ fastify.register(async function(fastify) {
 
           } catch (err) {
             console.error('Claude error:', err.message);
+            if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_start_error'); break; }
             const fallback = session.isSpanish
               ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
               : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
@@ -4430,13 +4697,21 @@ fastify.register(async function(fastify) {
         case 'interrupt': {
           const interruptedSession = sessions.get(ws.callSid);
           console.log('Caller interrupted');
+          noteCallActivity_(interruptedSession, Date.now());   // pass 17
           if (interruptedSession && interruptedSession.activeStream) {
             interruptedSession.activeStream.abort();
           }
           break;
         }
 
+        case 'dtmf': {
+          // Pass 17: a keypress is caller activity for the silence watchdog (no other handling).
+          noteCallActivity_(sessions.get(ws.callSid), Date.now());
+          break;
+        }
+
         case 'end': {
+          if (ws._stopCallWatchdog) { ws._stopCallWatchdog(); ws._stopCallWatchdog = null; }
           const session = sessions.get(ws.callSid);
           if (session) {
             const lines = session.conversation
@@ -4474,6 +4749,7 @@ End of transcript
 
     ws.on('close', () => {
       clearInterval(keepAlive);
+      if (ws._stopCallWatchdog) { ws._stopCallWatchdog(); ws._stopCallWatchdog = null; }
       if (ws.callSid) {
         const session = sessions.get(ws.callSid);
         if (session && session.conversation.length > 1) {
