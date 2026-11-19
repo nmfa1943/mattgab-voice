@@ -229,6 +229,10 @@ const MAINTENANCE_EMERGENCY  = '602-997-2928 extension 3';
 // ============================================================
 const CONTENT_URL     = process.env.CONTENT_URL || 'https://mattgabmanagement.com/content-api.php';
 const CONTENT_TTL_MS  = 60 * 1000; // re-check the store at most once a minute
+// D-20261119-15: content-api.php will require a private key (X-Content-Key).
+// Set CONTENT_API_KEY on Railway. Unset = no header, exactly as before, so this
+// code is safe to ship before the variable exists. Never log the value.
+const CONTENT_API_KEY = process.env.CONTENT_API_KEY || '';
 
 const DEFAULT_CONTENT = {
   meta: { version: 0, effective_date: 'baseline', updated_by: 'DEFAULT_CONTENT' },
@@ -1826,7 +1830,10 @@ async function loadContent() {
   if (now - CONTENT_TS < CONTENT_TTL_MS) return CONTENT_CACHE;
   CONTENT_TS = now; // stamp first so a hang can't cause a fetch stampede
   try {
-    const res = await fetch(CONTENT_URL, { signal: AbortSignal.timeout(2500) });
+    const res = await fetch(CONTENT_URL, {
+      signal: AbortSignal.timeout(2500),
+      headers: CONTENT_API_KEY ? { 'X-Content-Key': CONTENT_API_KEY } : {},
+    });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
     if (validateContent(data)) {
