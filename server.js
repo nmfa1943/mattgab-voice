@@ -408,6 +408,9 @@ function callerAskedWhoYouAre(conversation) {
   if (/\b(who are you|who is this|who(?:'s| is) this|who am i (?:speaking|talking|chatting)(?: (?:to|with))?|who(?:'s| is) (?:calling|on the (?:phone|line))|what(?:'s| is) your name|what are you)\b/i.test(t)) return true;
   if (/\b(?:are|is) you (?:a |an )?(?:real )?(?:person|robot|human|ai|assistant|bot|machine)\b/i.test(t)) return true;
   if (/\bare you (?:real|human|a bot)\b/i.test(t)) return true;
+  // D-20261120 fix 6: a caller announcing they are a virtual or AI assistant
+  // (calling for someone) is not a wrong number. Keep our own AI intro intact.
+  if (/\b(?:i'?m|i am|this is)(?: a| an| the| your)? (?:virtual|ai|a\.i\.|automated|digital|personal) assistant\b/i.test(t)) return true;
   if (/\bis this (?:a |an )?(?:bot|robot|ai|assistant|machine|recording|real person|person|human)\b/i.test(t)) return true;
   if (/\bam i (?:talking|speaking) to (?:a |an )?(?:real )?(?:person|human|bot|robot|ai|machine|assistant)\b/i.test(t)) return true;
   if (/\bis this (?:even )?(?:a )?(?:real )?(?:person|human)\b/i.test(t)) return true;
@@ -443,6 +446,13 @@ function sanitizeGreeting(text, opts) {
     }
   }
   if (opts.alreadyIntroduced && !opts.callerAskedWhoYouAre) {
+    // D-20261120 fix 6 (leads 200083, 200087): "...some confusion. I'm the AI leasing
+    // assistant for Mattgab Management, and I handle..." lost only the intro clause
+    // and was spoken as "...some confusion. , and I handle...". When the intro starts
+    // a sentence and runs into ", and ...", drop the clause AND the joiner, then
+    // capitalize what is left of the sentence.
+    t = t.replace(/(^|[.!?]\s+)(?:this is|i am|i'?m) the ai (?:leasing )?assistant for mattgab management\s*,\s*(?:and|so|y)?\s*(\S)/ig,
+      (m, pre, ch) => pre + ch.toUpperCase());
     t = t.replace(/\s*(this is|i am|i'?m) the ai (leasing )?assistant for mattgab management[.!]?\s*/ig, ' ');
     // Pass 12: drop the WHOLE intro sentence ("Soy el asistente ... Mattgab Management."), only where a sentence
     // starts. The old pattern cut just "Soy el asistente de IA" and left "de arrendamiento de ..." behind.
@@ -607,10 +617,20 @@ function polishAssistantReply(text, opts) {
   t = sanitizeHoursInReply(t, opts.property, opts);
   t = dedupeRepeatedSentences(t);
   t = String(t || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  t = fixOrphanSentenceStarts_(t);   // D-20261120 fix 6 fallback: never speak ". , and"
   if (t && !(isOnlyGreetingOrReintro_(t) && !opts.callerAskedWhoYouAre)) return t;
   const fallback = stripTimeOfDayGreetingOnly_(original).replace(/[ \t]+/g, ' ').trim();
   if (fallback && !(isOnlyGreetingOrReintro_(fallback) && !opts.callerAskedWhoYouAre)) return fallback;
   return opts.isSpanish ? SAFE_REPLY_ES : SAFE_REPLY_EN;
+}
+
+// D-20261120 fix 6 fallback. Any sanitizer that removes a clause can leave a
+// sentence that starts with a comma (". , and I handle"). Drop the orphan
+// comma and a dangling joiner, and capitalize the first letter.
+function fixOrphanSentenceStarts_(text) {
+  let t = String(text || '');
+  t = t.replace(/(^|[.!?]\s+)\s*,\s*(?:(?:and|so|but|y|pero)\s+)?(\S)/gi, (m, pre, ch) => (pre ? pre.replace(/\s*$/, ' ') : '') + ch.toUpperCase());
+  return t.replace(/^\s+/, '').replace(/[ \t]{2,}/g, ' ');
 }
 
 function neverEmptyReply(text, opts) {
@@ -860,9 +880,182 @@ function isBareMessageRequest_(text) {
   return BARE_MESSAGE_RE_.test(String(text || ''));
 }
 
+// ============================================================
+// D-20261120 fixes 3, 4, 5 and name spelling (helpers)
+// ============================================================
+// Fix 3 (leads 200091, 200092, 200094, prior-tenant rows): former-tenant
+// balance or collections calls, and city or agency calls (inspectors,
+// caseworkers, eviction questions), are not NMF sales leads. Jenea, Nov 20:
+// they go to Viola. Routing uses the EXISTING take-a-message-for-Viola path
+// (VIOLA_MESSAGE_*); no new phone number. The lead row is tagged non-lead.
+//
+// Status written for a non-lead row. These statuses already exist on the
+// dashboard (Other Callers) and are hidden from the Mailchimp/Twilio welcome
+// sync, so a non-lead caller never gets a welcome text. Default 'resident'
+// (Other Callers > Residents, which Viola works). LEO_NONLEAD_STATUS can pick
+// another existing category; anything else falls back to the default.
+// OPEN QUESTION for Jenea: is 'resident' right for city and agency calls too?
+const NONLEAD_ALLOWED_STATUSES_ = ['resident', 'vendor', 'maintenance', 'transfer'];
+const NONLEAD_LEAD_STATUS = NONLEAD_ALLOWED_STATUSES_.indexOf(String(process.env.LEO_NONLEAD_STATUS || '').trim().toLowerCase()) !== -1
+  ? String(process.env.LEO_NONLEAD_STATUS).trim().toLowerCase()
+  : 'resident';
+// Who non-lead messages are for. Viola is already on the call tree (ext 1 via
+// the office line); no new number or address is needed for a message.
+const NONLEAD_ROUTE_TO = 'Viola';
+
+function callerTurnsText_(conversation) {
+  return (conversation || []).filter(m => m && m.role === 'user').map(m => String(m.content || '')).join('\n');
+}
+
+function classifyNonLeadCall_(conversation) {
+  const raw = callerTurnsText_(conversation);
+  if (!raw.trim()) return null;
+  const t = normalizeForMatch_(raw).replace(/[’']/g, '');
+  // Former tenant + money question.
+  const former = /\b(used to live|lived there|lived here|i lived|we lived|moved out|move out|former (tenant|resident)|previous (tenant|resident)|prior (tenant|resident)|ex tenant|when i (lived|was living|rented)|my old (apartment|unit|lease)|ya no vivo|vivia (ahi|aqui|alli)|vivi (ahi|aqui|alli)|me mude|inquilino anterior|ex inquilin[oa])\b/;
+  const money = /\b(balance|owe|owed|owing|debt|collections?|collection agency|credit report|credit bureau|charged me|charges|final bill|deposit back|deposit refund|saldo|deuda|debo|cobranza|cobro|reporte de credito|cargos)\b/;
+  const aboutUs = /\b(you guys|your company|your office|mattgab|matt gab|the property|ustedes|su compania|su oficina)\b[^.?!\n]{0,60}\b(collections?|credit report|reporte de credito|cobranza)\b|\b(collections?|credit report|reporte de credito|cobranza)\b[^.?!\n]{0,60}\b(you guys|your company|mattgab|matt gab|ustedes)\b/;
+  if ((former.test(t) && money.test(t)) || aboutUs.test(t)) return { kind: 'former_tenant', label: 'former resident balance or collections' };
+  // City, agency or caseworker, identified by the caller about themselves.
+  const agencyTerm = '(city of phoenix|the city|code enforcement|code compliance|neighborhood services|inspector|caseworker|case worker|case manager|social worker|human services|hsd|housing authority|department of|county|dcs|police|sheriff|constable|justice court|the court|process server|fire department|la ciudad|trabajador social|trabajadora social|inspectora?|departamento de|la corte|policia|alguacil)';
+  const selfId = new RegExp('\\b(im|i am|this is|calling from|calling with|calling on behalf of|i work for|i work with|i work at|soy|llamo de|llamo del|hablo de|hablo del|le llamo de|de parte de)\\b[^.?!\\n]{0,60}?\\b' + agencyTerm + '\\b');
+  const ownWorker = /\b(my|mi) (caseworker|case worker|case manager|social worker|trabajador(a)? social)\b/;
+  if (selfId.test(t) && !ownWorker.test(t)) return { kind: 'agency', label: 'city, agency or caseworker call' };
+  // Eviction questions from a third party or about a case (not a prospect's screening question).
+  const eviction = /\b(eviction|evict|evicted|desalojo|desalojar)\b/;
+  const caseWords = /\b(request|notice|clarif\w*|case|hearing|filing|filed|paperwork|writ|judgment|aviso|demanda|orden|audiencia)\b/;
+  const screening = /\b(do you|would you|can i|will you|could i|would i|aceptan|puedo)\b[^.?!\n]{0,50}\b(accept|approve|rent|apply|qualify|aplicar|rentar|calificar)\b|\b(i have|i had|tengo|tuve) (an |a |un )?(eviction|desalojo)\b/;
+  if (eviction.test(t) && caseWords.test(t) && !screening.test(t)) return { kind: 'agency', label: 'eviction question' };
+  return null;
+}
+
+function nonLeadHint_(conversation, opts) {
+  opts = opts || {};
+  if (isMaintenanceCall(conversation, { recentUserTurns: 3 })) return '';
+  const nl = classifyNonLeadCall_(conversation);
+  if (!nl) return '';
+  const msg = opts.isSpanish ? VIOLA_MESSAGE_ES : VIOLA_MESSAGE_EN;
+  const confirm = opts.isSpanish
+    ? 'Gracias, [Nombre]. Le paso su mensaje a Viola y ella le devolverá la llamada en horario de oficina.'
+    : "Thank you, [Name]. I'll pass this to Viola and she'll call you back during office hours.";
+  return '\n\nTHIS TURN ONLY: this caller is NOT a leasing prospect (' + nl.label + '). Do not pitch units, prices, tours or the application. ' +
+    'Do not discuss any balance, amount, account, lease or resident details, and do not confirm or deny whether anyone lives or lived here. ' +
+    'Calls like this go to Viola, so take a message for Viola. If you have not already said it, say: "' + msg + '" ' +
+    'Then, one question per turn, ask ONLY for what is still missing (NEVER re-ask a name you already have): what they want you to tell Viola, and whether the number they are calling from is the best callback number. ' +
+    'When you have it, confirm once: "' + confirm + '" If they ask for a person, give the office line with Viola\'s extension per the STAFF-TO-EXTENSION MAPPING and offer the message.';
+}
+
+// Fix 4 (lead 200102): prospect intake. Unit size, move-in date and how they
+// heard about us, then the tour or the waiting list (for example the 3BR).
+function prospectIntakeState_(conversation) {
+  const callers = normalizeForMatch_(callerTurnsText_(conversation));
+  const leo = normalizeForMatch_((conversation || []).filter(m => m && m.role === 'assistant').map(m => String(m.content || '')).join('\n'));
+  const prospect = /\b(price|prices|pricing|rent|how much|available|availability|bedroom|bedrooms|unit|units|apartment|apartments|tour|apply|application|move in|moving|waitlist|waiting list|opening|open up|opens up|vacanc\w*|recamaras?|departamento|apartamento|disponible|disponibilidad|precio|renta|mudarme|mudanza)\b/.test(callers);
+  const unit = /\b(1|2|3|one|two|three|uno|una|dos|tres)[ -]?(bed|beds|bedroom|bedrooms|br|recamaras?|habitacion(es)?|cuartos?)\b|\bstudio\b|\bestudio\b/.test(callers);
+  const moveIn = /\b(january|february|march|april|may|june|july|august|september|october|november|december|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|next month|this month|next week|asap|as soon as possible|right away|immediately|end of the month|first of the month|in (a|one|two|three|\d+) (week|weeks|month|months)|lo antes posible|el proximo mes|este mes|la proxima semana|de inmediato)\b/.test(callers);
+  const heard = /\b(zillow|facebook|marketplace|google|apartments com|apartments\.com|craigslist|drive by|drove by|driving by|sign|banner|friend|family member|referral|referred|instagram|website|yelp|hotpads|zumper|apartment list|rent com|amigo|amiga|letrero|pagina|internet)\b/.test(callers);
+  const askedUnit = /\b(which (bedroom )?size|what size|one, two,? or three bedroom|que tamano busca)\b/.test(leo);
+  const askedMoveIn = /\b(move in|moving in|mudarse|se muda|mudanza)\b[^.?!]*\?/.test(leo);
+  const askedHeard = /\b(how did you hear|how you heard|como se entero|como nos encontro)\b/.test(leo);
+  const offeredNext = /\b(tour link|waiting list|waitlist|lista de espera|enlace (para reservar|de visitas)|recorrido)\b/.test(leo);
+  return { prospect, unit, moveIn, heard, askedUnit, askedMoveIn, askedHeard, offeredNext };
+}
+
+function prospectIntakeHint_(conversation, opts) {
+  opts = opts || {};
+  if (isMaintenanceCall(conversation, { recentUserTurns: 3 })) return '';
+  if (classifyNonLeadCall_(conversation)) return '';
+  const lastUser = recentUserTurns_(conversation, 1).join(' ');
+  if (!lastUser || officeRequestIntent_(lastUser) || isBareMessageRequest_(lastUser)) return '';
+  const st = prospectIntakeState_(conversation);
+  if (!st.prospect) return '';
+  const es = !!opts.isSpanish;
+  const q = {
+    unit: es ? '¿Qué tamaño busca, de una, dos o tres recámaras?' : 'Which size are you looking for, the one, two, or three bedroom?',
+    moveIn: es ? '¿Para cuándo piensa mudarse?' : 'When are you looking to move in?',
+    heard: es ? '¿Y cómo se enteró de nosotros?' : 'And how did you hear about us?'
+  };
+  const missing = [];
+  if (!st.unit && !st.askedUnit) missing.push('"' + q.unit + '"');
+  if (!st.moveIn && !st.askedMoveIn) missing.push('"' + q.moveIn + '"');
+  if (!st.heard && !st.askedHeard) missing.push('"' + q.heard + '"');
+  if (missing.length) {
+    return '\n\nTHIS TURN ONLY: this is a leasing prospect. FIRST answer what they just asked. Then, as your one question, ask the FIRST of these that is still missing: ' + missing.join(' then ') +
+      '. Ask each one only once in the call; if they skip it, move on. Never hold back a price, availability or the tour link for these questions.';
+  }
+  if (!st.offeredNext) {
+    return '\n\nTHIS TURN ONLY: this prospect has given (or skipped) the bedroom size, move-in timing and how they heard about us. After you answer what they just asked, offer the next step: the tour link for an AVAILABLE unit type, or the waiting list per the WAITLIST rule if the type they want is not available now (for example the three bedroom). Ask consent before texting any link.';
+  }
+  return '';
+}
+
+// Fix 5 (test calls 200083, 200085): pet follow-ups ("per pet?", "2 dogs?",
+// "weight limit?") got the same deflection three times. Answer once from the
+// policy, then do not repeat it. PLACEHOLDER: per-pet fees and weight or count
+// limits are NOT confirmed by Jenea. While these stay empty, Leo keeps the
+// approved Nov 18 wording (no "per pet", no limits). Fill both languages only
+// after Jenea confirms, then update the PET POLICY "Never say" line to match.
+const PET_POLICY_DETAILS = {
+  per_pet_en: '',   // TODO(Jenea): e.g. whether pet rent and the one-time fee apply per pet
+  per_pet_es: '',
+  limits_en: '',    // TODO(Jenea): weight and number-of-pets limits, if any
+  limits_es: ''
+};
+
+function petFollowupHint_(conversation, opts) {
+  opts = opts || {};
+  const lastUser = normalizeForMatch_(recentUserTurns_(conversation, 1).join(' '));
+  if (!/\b(pet|pets|dog|dogs|cat|cats|puppy|perro|perros|gato|gatos|mascota|mascotas|per pet|each pet|weight|pounds|lbs|breed|breeds|how many|libras|raza|peso|cuantas)\b/.test(lastUser)) return '';
+  if (/\b(service|assistance|support|esa|emotional|guide|servicio|apoyo)\b/.test(lastUser)) return '';
+  const leoTurns = (conversation || []).filter(m => m && m.role === 'assistant').map(m => normalizeForMatch_(m.content || ''));
+  const gavePolicy = leoTurns.some(x => /pet rent|renta de mascota/.test(x));
+  const gaveDeflect = leoTurns.some(x => /(size, breed, weight and number of pets are subject|el tamano, la raza, el peso y la cantidad de mascotas estan sujetos)/.test(x));
+  if (!gavePolicy && !gaveDeflect) return '';
+  const es = !!opts.isSpanish;
+  const details = es ? [PET_POLICY_DETAILS.per_pet_es, PET_POLICY_DETAILS.limits_es] : [PET_POLICY_DETAILS.per_pet_en, PET_POLICY_DETAILS.limits_en];
+  const filled = details.filter(Boolean);
+  if (filled.length) {
+    return '\n\nTHIS TURN ONLY: pet follow-up. Answer it ONCE from this approved detail, in one sentence: "' + filled.join(' ') + '" Do not repeat a pet sentence you already said.';
+  }
+  if (!gaveDeflect) return '';
+  const line = es
+    ? 'Nuestra oficina puede confirmar los detalles para sus mascotas. ¿Desea que le tome un mensaje para que le llamen, o que le envíe nuestro enlace para reservar un recorrido?'
+    : 'Our office can confirm the details for your pets. Would you like me to take a message so they can call you back, or text you our tour link?';
+  return '\n\nTHIS TURN ONLY: pet follow-up, and you ALREADY gave the pet policy and the "subject to management approval" answer on this call. Do NOT say either again, and do not invent any extra fee, weight limit or pet count. Say exactly: "' + line + '"';
+}
+
+// Name spelling (lead 200102, name came through garbled). A name ask whose
+// answer did not validate gets ONE request to spell it.
+const NAME_ASK_TAIL_RE_ = /(first name|your name|su nombre|su primer nombre)[^?]*\?\s*$/i;
+const SPELL_ASK_RE_ = /\b(spell (it|that|your (first )?name)|deletrear|deletrea|me lo puede deletrear)\b/i;
+function nameSpellHint_(conversation, opts) {
+  opts = opts || {};
+  const convo = conversation || [];
+  if (convo.length < 2) return '';
+  const last = convo[convo.length - 1];
+  const prev = convo[convo.length - 2];
+  if (!last || last.role !== 'user' || !prev || prev.role !== 'assistant') return '';
+  if (!NAME_ASK_TAIL_RE_.test(prev.content || '')) return '';
+  if (convo.some(m => m && m.role === 'assistant' && SPELL_ASK_RE_.test(m.content || ''))) return '';
+  const reply = String(last.content || '').trim()
+    .replace(/^[¿¡]+\s*/, '')
+    .replace(/^(mi primer nombre es|my (?:first|1st) name is|first name is|my name is|it'?s|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '')
+    .trim();
+  const words = reply.split(/\s+/).filter(Boolean);
+  if (!reply || words.length > 3) return '';
+  if (/^(no|nope|why|not|prefer not|no gracias|rather not)\b/i.test(reply)) return '';
+  if (isValidName_(unspell_(reply))) return '';
+  const line = opts.isSpanish ? 'Disculpe, ¿me puede deletrear su nombre?' : 'Sorry, could you spell your first name for me?';
+  return '\n\nTHIS TURN ONLY: the name you just heard did not come through clearly. Ask ONCE, and only this: "' + line + '"';
+}
+
 function buildTurnSystemHints(conversation, opts) {
   opts = opts || {};
   let suffix = '';
+  suffix += nonLeadHint_(conversation, opts);
+  suffix += prospectIntakeHint_(conversation, opts);
+  suffix += petFollowupHint_(conversation, opts);
+  suffix += nameSpellHint_(conversation, opts);
   if (shouldAskOpenQuestion(conversation)) {
     const q = opts.isSpanish ? OPEN_QUESTION_ES : OPEN_QUESTION_EN;
     suffix += '\n\nTHIS TURN ONLY: the caller has given two unclear one-word replies to an either/or question. Do not repeat the either/or. Ask one open question: "' + q + '"';
@@ -2169,6 +2362,7 @@ function buildSystemPrompt(property, content) {
 ${fallbackAvailabilityRule}
 GREETING AND DELIVERY RULES — CRITICAL:
 - The welcome greeting has ALREADY been played before your first turn. Never open a turn with "Good morning", "Good afternoon", "Good evening", "Good day", "Buenos días", "Buenas tardes", or "Buenas noches". Those time-of-day greetings are forbidden on every turn, including the first.
+- A caller who says they are a virtual, AI or automated assistant calling for someone is NOT a wrong number and NOT confused. Say you are the AI leasing assistant for Mattgab Management once, then help them like any caller: answer the question or take a message for the team.
 - Never re-introduce yourself after the welcome greeting. Do not say "This is the AI leasing assistant", "I am the AI leasing assistant", "Thank you for calling", "Gracias por llamar", or "Soy el asistente" again, unless the caller directly asks who or what you are.
 - Never say two near-identical sentences in one turn. If you already said a sentence, do not repeat it with slightly different wording. One answer, then one question.
 - PLAIN SPOKEN TEXT ONLY. Everything you write is read aloud by a text-to-speech voice. Never use markdown or any formatting: no asterisks, no bold or italics, no pound signs, no backticks, no bullet points, no numbered lists, no dashes used as bullets, and no links in brackets. Write short, plain spoken sentences. To list units, say them in one flowing sentence ("our one bedroom is X, our two bedroom is Y").
@@ -2293,7 +2487,8 @@ QUALIFICATION — HELP FIRST, NAME AND QUALIFIERS COME NATURALLY (DO NOT INTERRO
 - Do NOT ask for the caller's name as your opening move, and do NOT run qualifying questions before you have helped with what they called about. Give them the price, the availability, or the answer they asked for, THEN continue naturally.
 - Capture the caller's FIRST NAME at a natural moment: right before you text a tour or application link, or add them to the waiting list. Say "Happy to help. Can I get your first name?" You need a name before sending a link anyway, so ask then. Confirm warmly ("Thanks, Mary.") and NEVER re-ask it once captured.
 - A short reply that could be a name ("Mary", "Marcus", "It's Mary"), given right after YOU asked for the name, IS the name. Capture it, do not re-ask. Speech-to-text may add a question mark to a bare name; it is still a name.
-- Qualify LIGHTLY and only woven into a real leasing conversation, one at a time, never as a checklist: move-in timing, then number of occupants. Ask "how did you hear about us" only if the conversation is already flowing and the caller is engaged, never as a gate before helping.
+- PROSPECT INTAKE (Jenea, Nov 20 2026): after you have helped with what a prospect asked, collect these three, ONE per turn, woven in naturally, each asked only once in the call: (1) which bedroom size they want, unless they already said, (2) when they are looking to move in, (3) how they heard about us. Then offer the next step: the tour link for an AVAILABLE unit type, or the waiting list for a type that is not available now (for example the three bedroom). If the caller skips one, move on.
+- If the first name you heard is unusual, unclear, or sounds cut off or misheard, ask ONCE: "Sorry, could you spell your first name for me?" (Spanish: "Disculpe, ¿me puede deletrear su nombre?"). Never ask for the name itself again.
 - If a caller just wants a price or a tour, give it immediately. Do NOT gate pricing, availability, or a tour behind name or qualifiers.
 - Do NOT ask about employment, income, or whether they are working.
 - If the caller does not answer a qualifier, do not push. Move on and be helpful. NEVER ask the same question three times.
@@ -2481,6 +2676,18 @@ function extractCallerName(session) {
     .replace(/^[¿¡]+\s*/, '')
     .replace(/^(mi primer nombre es|my (?:first|1st) name is|first name'?s|first name is|my name is|i'?m|i am|this is|me llamo|soy|mi nombre es|to|for)\s+/i, '')
     .trim();
+
+  // D-20261120: if Leo asked the caller to spell the name, the spelled answer
+  // wins over the first (possibly misheard) one. "S-H-A-R-D-E" and "S h a r d e" both join.
+  for (let i = convo.length - 2; i >= 0; i--) {
+    const m = convo[i];
+    if (m.role !== 'assistant' || !SPELL_ASK_RE_.test(m.content || '')) continue;
+    const nxt = convo.slice(i + 1).find(x => x.role === 'user');
+    if (!nxt) break;
+    const spelled = unspell_(stripIntro(String(nxt.content || '').replace(/[-.,]+/g, ' ').replace(/\s+/g, ' ').trim()));
+    if (isValidName_(spelled)) return cleanName_(spelled);
+    break;
+  }
 
   // Walk turns. After each AI ask, grab the next caller turn and try to validate.
   for (let i = 0; i < convo.length - 1; i++) {
@@ -3113,6 +3320,11 @@ function loopGuardLines_(isSpanish) {
       soft: 'Solo para que lo sepa, puedo tomar un mensaje para nuestro equipo o comunicarle con la oficina.',
       message: 'Claro. ¿Me puede dar su nombre?',
       nameAgain: '¿Me puede dar su nombre, por favor?',
+      // D-20261120 fix 1: once a name is captured, never ask for it again.
+      askMessage: 'Gracias. ¿Qué desea que le diga al equipo?',
+      askCallback: '¿Es este el mejor número para devolverle la llamada?',
+      Bnamed: 'Permítame tomar un mensaje para que nuestro equipo le devuelva la llamada. ¿Qué desea que le diga al equipo?',
+      savedClose: 'Gracias{NAME}. Tengo su mensaje y se lo paso al equipo, y le devolverán la llamada al número desde el que llama en horario de oficina. Adiós.',
       price: 'Puedo ayudarle con nuestros precios actuales, todos los servicios incluidos. ¿Qué tamaño busca, de una, dos o tres recámaras?',
       tour: 'Puedo ayudarle a programar una visita. ¿Desea que le envíe el enlace para reservar un recorrido?',
       bye: 'Gracias por llamar. Adiós.'
@@ -3125,6 +3337,11 @@ function loopGuardLines_(isSpanish) {
     soft: 'Just so you know, I can take a message for our team or connect you with the office.',
     message: 'Of course. Can I get your first name?',
     nameAgain: "Sorry, what's your first name?",
+    // D-20261120 fix 1: once a name is captured, never ask for it again.
+    askMessage: 'Thanks. And what would you like me to tell the team?',
+    askCallback: "Is the number you're calling from the best one for a callback?",
+    Bnamed: 'Let me take a message so our team can call you back. What would you like me to tell them?',
+    savedClose: "Thank you{NAME}. I have your message, and I'll pass it to the team. They'll call you back at the number you're calling from during office hours. Goodbye.",
     price: 'I can help with our current prices, all utilities included. Which bedroom size are you interested in, the one, two, or three bedroom?',
     tour: 'I can help you schedule a tour. Would you like me to text you the tour link?',
     bye: 'Thank you for calling. Goodbye.'
@@ -3141,6 +3358,90 @@ function officeHandoffLine_(session, isSpanish) {
   }
   const hours = formatHoursStatement_(property.hours || '', 'en');
   return 'Of course. You can reach our office at ' + phone + '. ' + hours + ' Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?';
+}
+
+// D-20261120 fix 1 (leads 200091, 200096, 200097, 200098, 200101, 200102):
+// the guard re-asked "Sorry, what's your first name?" after the name was
+// captured, because message content never counted as progress once a name
+// existed, then closed with "I'm having trouble hearing you". These helpers
+// pick the next message-flow line from what is ALREADY captured, and pick a
+// close line that confirms the message instead of blaming the line.
+function loopGuardCapturedName_(session) {
+  const g = session && session.loopGuard;
+  const slotName = g && g.slots && g.slots.name;
+  if (slotName) return slotName;
+  // Filler ("mmm", "uh") is never a name, even if the extractor would take it.
+  let n = '';
+  try { n = extractCallerName(session) || ''; } catch (e) { n = ''; }
+  return (n && !looksUnintelligible_(n)) ? n : '';
+}
+
+function loopGuardHasMessage_(session) {
+  const g = session && session.loopGuard;
+  return !!(g && g.slots && g.slots.message);
+}
+
+function stallCloseLine_(session) {
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const name = loopGuardCapturedName_(session);
+  if (name || loopGuardHasMessage_(session)) {
+    const nameBit = name ? ', ' + String(name).split(/\s+/)[0] : '';
+    return lines.savedClose.replace('{NAME}', nameBit);
+  }
+  return lines.C;
+}
+
+function stepBLine_(session) {
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  return loopGuardCapturedName_(session) ? lines.Bnamed : lines.B;
+}
+
+// Next message-flow question for a no-progress turn. Never the name when one
+// is captured. Returns { reply, close } where close means save and end politely.
+function nextMessageFlowLine_(session) {
+  const g = ensureLoopGuardState_(session);
+  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lastLeo = normalizeLoopText_(lastTurnByRole_(session, 'assistant') || '');
+  const asked = function (line) { return normalizeLoopText_(line) === lastLeo; };
+  if (!loopGuardCapturedName_(session)) {
+    // Ask the name at most once more; after that take the message without it.
+    if (!g.nameReasked && !asked(lines.nameAgain)) { g.nameReasked = true; return { reply: lines.nameAgain, close: false }; }
+    if (!loopGuardHasMessage_(session) && !g.messageAsked) { g.messageAsked = true; return { reply: lines.askMessage, close: false }; }
+    return { reply: stallCloseLine_(session), close: true };
+  }
+  if (!loopGuardHasMessage_(session) && !g.messageAsked) { g.messageAsked = true; return { reply: lines.askMessage, close: false }; }
+  if (!g.callbackAsked) { g.callbackAsked = true; return { reply: lines.askCallback, close: false }; }
+  return { reply: stallCloseLine_(session), close: true };
+}
+
+// D-20261120 fix 2 (leads 200090, 200092, 200094, 200099, 200101): ask-for-a-
+// person words that must reach the EXISTING office handoff (officeHandoffLine_)
+// instead of the menu. Leo never live-transfers; the handoff gives the office
+// line and offers a message, exactly as before.
+function officeRequestIntent_(text, opts) {
+  opts = opts || {};
+  const norm = normalizeLoopText_(text);
+  if (!norm) return null;
+  // The caller describing their own job is not a request ("I'm a manager at...", "soy gerente").
+  if (/\b(i am|im|i work as|soy|trabajo como)( a| an| the| un| una| el| la)? (manager|representative|supervisor|gerente|representante|encargado|encargada|supervisora?)\b/.test(norm)) return null;
+  const spanishWords = /\b(representante|gerente|encargad[oa]|una persona|persona real|alguien|oficina|hablar|comunicarme)\b/;
+  const words = norm.split(' ').length;
+  // Bare short replies: "representative", "a manager", "management please", "una persona".
+  const bare = /^(i said |i just want |i want |i need |just |quiero |necesito )?(a |an |the |un |una |el |la |my |mi )?(representative|rep|manager|management|supervisor|someone in charge|somebody in charge|person in charge|real person|live person|representante|gerente|encargad[oa]|persona real|una persona|la oficina)( please| por favor)?$/;
+  if (words <= 5 && bare.test(norm)) {
+    // "una persona" right after an occupants question is a head count, not a request.
+    if (/\bpersona\b/.test(norm) && /\b(how many|cuantas personas|cuantos|occupants|ocupantes|vivir(an|ian)?)\b/.test(normalizeLoopText_(opts.lastAssistant || ''))) return null;
+    return { intent: 'office', spanish: spanishWords.test(norm) };
+  }
+  // Any length, with ask wording.
+  const ask = /\b(speak|talk|talking|speaking|get|connect me|transfer me|put me through)( to| with)?( to| with)?( a| an| the| your| some| someone| somebody)? ?(representative|rep|manager|management|supervisor|someone in charge|somebody in charge|person in charge|real person|live person|actual person|human)\b/;
+  const want = /\b(want|need|like|looking for|asking for|requesting|give me|get me)( to)?( speak| talk)?( to| with)?( a| an| the| your| some)? ?(representative|manager|management|supervisor|someone in charge|somebody in charge|person in charge|real person|live person)\b/;
+  const isThere = /\bis there (a |an )?(manager|supervisor|representative|someone in charge|somebody in charge|real person|live person)\b/;
+  const es = /\b(hablar|comunicarme|comunicar|hable|pasar|pasarme|quiero|necesito|puedo)( hablar)?( con)? (un |una |el |la )?(representante|gerente|encargad[oa]|persona real|una persona|alguien a cargo)\b/;
+  if (ask.test(norm) || want.test(norm) || isThere.test(norm) || es.test(norm)) {
+    return { intent: 'office', spanish: es.test(norm) };
+  }
+  return null;
 }
 
 function ensureLoopGuardState_(session, nowMs) {
@@ -3191,9 +3492,12 @@ function wouldBeThirdLeoRepeat_(session, reply) {
   return last.length >= 2 && last[0] === norm && last[1] === norm;
 }
 
-function loopGuardKeywordIntent_(text) {
+function loopGuardKeywordIntent_(text, opts) {
   const norm = normalizeLoopText_(text);
   if (!norm) return null;
+  // D-20261120 fix 2: transfer words work at any length (with ask wording).
+  const officeAsk = officeRequestIntent_(text, opts);
+  if (officeAsk) return officeAsk;
   if (loopGuardWordCount_(text) > 3 && !isBareMessageRequest_(text)) return null;
   // Refusals win: "no message" is not a request to leave one.
   if (/\b(no|nope|not|dont|nada)\b/.test(norm) && /\b(message|mensaje|recado|voicemail)\b/.test(norm)) return null;
@@ -3263,7 +3567,11 @@ function detectNewLoopSlots_(session, userText) {
   if (g.messageFlow) {
     const keyword = loopGuardKeywordIntent_(t);
     const norm = normalizeLoopText_(t);
-    if (norm && !keyword && !nameNow && !looksUnintelligible_(t) && norm !== g.lastCallerNorm && loopGuardWordCount_(t) >= 2) {
+    // D-20261120 fix 1: this used to require !nameNow, so once a name was
+    // captured the caller's message never counted and Leo re-asked the name.
+    // Only the turn that IS the name answer (short, name just captured) is skipped.
+    const isNameAnswer = found.indexOf('name') !== -1 && loopGuardWordCount_(t) <= 3;
+    if (norm && !keyword && !isNameAnswer && !looksUnintelligible_(t) && norm !== g.lastCallerNorm && loopGuardWordCount_(t) >= 2) {
       if (!slots.message || slots.message !== t.trim()) {
         slots.message = String(t).trim().slice(0, 200);
         found.push('message');
@@ -3278,7 +3586,7 @@ function answersLastLoopQuestion_(session, userText) {
   if (!last || !/[?¿]/.test(last)) return false;
   const t = normalizeLoopText_(userText);
   if (!t) return false;
-  if (/^(yes|yeah|yep|yup|yea|si|sure|ok|okay|correct|claro|perfecto)(\s+(please|por favor|thank you|thanks|gracias))?$/.test(t)) return true;
+  if (/^(yes|yeah|yep|yup|yea|ya|yah|si|sure|ok|okay|correct|claro|perfecto)(\s+(please|por favor|thank you|thanks|gracias))?$/.test(t)) return true;
   if (/^(no|nope|nah|no thanks|no thank you|no gracias)$/.test(t)) return true;
   if (/^(yes|yeah|yep|yup|si|sure)\b/.test(t) && !/\b(no|nope|nah)\b/.test(t)) return true;
   if (loopGuardKeywordIntent_(userText)) return true;
@@ -3297,7 +3605,7 @@ function broaderLoopIntent_(text) {
   if (/\b(tour|visit|schedule|cita|visita|recorrido)\b/.test(t)) return 'tour';
   if (/\b(apply|application|deposit|parking|solicitud|deposito|estacionamiento)\b/.test(t)) return 'availability';
   if (isBareMessageRequest_(text) || /\b(leave a message|dejar un mensaje)\b/.test(t)) return 'message';
-  if (/\b(agent|human|real person|speak to (someone|a person|an agent)|oficina|agente)\b/.test(t)) return 'office';
+  if (/\b(agent|human|real person|live person|representative|management|someone in charge|speak to (someone|a person|an agent|a manager|the manager)|oficina|agente|representante|gerente|encargad[oa])\b/.test(t)) return 'office';
   if (/\b(bye|goodbye|adios|hang up|eso es todo)\b/.test(t)) return 'goodbye';
   return null;
 }
@@ -3306,7 +3614,7 @@ function classifyLoopCallerTurn_(session, userText) {
   const g = ensureLoopGuardState_(session);
   const norm = normalizeLoopText_(userText);
   const silence = !norm;
-  const keyword = loopGuardKeywordIntent_(userText);
+  const keyword = loopGuardKeywordIntent_(userText, { lastAssistant: lastTurnByRole_(session, 'assistant') });
   const slots = detectNewLoopSlots_(session, userText);
   const answered = answersLastLoopQuestion_(session, userText);
   const isRepeat = !!(g.lastCallerNorm && norm && norm === g.lastCallerNorm);
@@ -3317,6 +3625,9 @@ function classifyLoopCallerTurn_(session, userText) {
   else if (answered && !isRepeat) progress = true;
   else if (intent && !isRepeat) progress = true;
   else if (session.languageSwitched && keyword && keyword.spanish) progress = true;
+  // D-20261120 fix 1 and 7: a new, intelligible sentence of 4+ words is the
+  // caller talking (often the message itself), not a stall.
+  else if (!isRepeat && !looksUnintelligible_(userText) && loopGuardWordCount_(userText) >= 4) progress = true;
   return { progress: progress, keyword: keyword, slots: slots, answered: answered, isRepeat: isRepeat, silence: silence, norm: norm, intent: intent };
 }
 
@@ -3446,15 +3757,17 @@ function nextLoopGuardLadderReply_(session, prefer, nowMs) {
     }
   }
   if (step === 'A' && (g.lastStep === 'A' || g.noProgressTurns >= 3 || g.repeatCount >= 2)) step = 'B';
-  if (step === 'B' && (g.lastStep === 'B' && wouldBeThirdLeoRepeat_(session, lines.B))) step = 'C';
+  if (step === 'B' && (g.lastStep === 'B' && wouldBeThirdLeoRepeat_(session, stepBLine_(session)))) step = 'C';
+  // D-20261120 fix 1: name and message already captured, so step B has nothing to ask.
+  if (step === 'B' && loopGuardCapturedName_(session) && loopGuardHasMessage_(session)) step = 'C';
   if (step === 'C') {
     g.lastStep = 'C';
-    return { step: 'C', reply: lines.C, hangUp: true };
+    return { step: 'C', reply: stallCloseLine_(session), hangUp: true };
   }
   if (step === 'B') {
     g.lastStep = 'B';
     g.messageFlow = true;
-    return { step: 'B', reply: lines.B, hangUp: false };
+    return { step: 'B', reply: stepBLine_(session), hangUp: false };
   }
   g.lastStep = 'A';
   return { step: 'A', reply: lines.A, hangUp: false };
@@ -3473,12 +3786,17 @@ function applyLeoRepeatGuard_(session, reply, nowMs) {
   const engaged = g.noProgressTurns === 0;
   if (g.lastStep === 'B' && !engaged) {
     logLoopGuardStep_(session, 'leoRepeat->C');
-    return { reply: lines.C, replaced: true, hangUp: true, step: 'C' };
+    return { reply: stallCloseLine_(session), replaced: true, hangUp: true, step: 'C' };
   }
   logLoopGuardStep_(session, 'leoRepeat->B');
   g.lastStep = g.lastStep === 'C' ? 'C' : 'B';
   g.messageFlow = true;
-  return { reply: lines.B, replaced: true, hangUp: false, step: 'B' };
+  // D-20261120 fix 1: name and message already in, so confirm the callback or close; never re-ask.
+  if (loopGuardCapturedName_(session) && loopGuardHasMessage_(session)) {
+    const n = nextMessageFlowLine_(session);
+    return { reply: n.reply, replaced: true, hangUp: n.close, step: n.close ? 'C' : 'B' };
+  }
+  return { reply: stepBLine_(session), replaced: true, hangUp: false, step: 'B' };
 }
 
 function finishLoopGuardHangup_(session, step, reply, nowMs) {
@@ -3514,11 +3832,32 @@ function runLoopGuardTurn_(session, nowMs) {
 
   // Keyword shortcut, only the first time that keyword starts a flow.
   // A repeated "Message" with no new slot is no-progress, not a fresh start.
+  // D-20261120 fix 2 (lead 200101): after the office handoff asked "Would you
+  // like to leave a message?", a plain yes ("Ya", "Yes") starts the message.
+  if (!classified.keyword && !g.messageFlow && g.officeHandoffGiven &&
+      /^(yes|yeah|yep|yup|yea|ya|yah|sure|ok|okay|please|si|claro|por favor)\b/.test(classified.norm || '') && !/\b(no|not|nope|dont)\b/.test(classified.norm || '') &&
+      /(leave a message\?|desea dejar un mensaje\?)\s*$/i.test(lastTurnByRole_(session, 'assistant') || '')) {
+    classified.keyword = { intent: 'message', spanish: false };
+    classified.progress = true;
+    noteLoopGuardProgress_(session, 'message_offer_yes');
+  }
+  // A repeated ask for a person after the handoff is not a stall: the caller
+  // still wants a person, so it goes to the message (below), not the menu.
+  const repeatOfficeAsk = !!(classified.keyword && classified.keyword.intent === 'office' && g.officeHandoffGiven && !g.messageFlow && !classified.progress);
+  if (repeatOfficeAsk) { classified.progress = true; noteLoopGuardProgress_(session, 'office_repeat'); }
   if (classified.keyword && classified.progress) {
     if (classified.keyword.spanish && session && !session.isSpanish) session.isSpanish = true;
     const replyLang = !!(session && session.isSpanish);
-    const raw = loopGuardKeywordReply_(session, classified.keyword.intent, replyLang);
-    if (classified.keyword.intent === 'message') g.messageFlow = true;
+    // A second ask for a person after the office line was already given: the
+    // route failed for them, so take the message (TAKE THE MESSAGE rule).
+    if (classified.keyword.intent === 'office' && g.officeHandoffGiven) classified.keyword = { intent: 'message', spanish: classified.keyword.spanish };
+    let raw = loopGuardKeywordReply_(session, classified.keyword.intent, replyLang);
+    if (classified.keyword.intent === 'office') g.officeHandoffGiven = true;
+    if (classified.keyword.intent === 'message') {
+      g.messageFlow = true;
+      // Never re-ask a captured name.
+      if (loopGuardCapturedName_(session)) { raw = loopGuardLines_(replyLang).askMessage; g.messageAsked = true; }
+    }
     if (classified.keyword.intent === 'goodbye') {
       const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, raw, nowMs), {});
       // Willing close still saves the lead, but it is not a stalled-call exit.
@@ -3538,7 +3877,7 @@ function runLoopGuardTurn_(session, nowMs) {
 
   // Step C: 5 no-progress turns, or 2 silence turns after step B.
   if (g.noProgressTurns >= 5 || (g.lastStep === 'B' && g.silenceTurns >= 2)) {
-    return finishLoopGuardHangup_(session, 'C', lines.C, nowMs);
+    return finishLoopGuardHangup_(session, 'C', stallCloseLine_(session), nowMs);
   }
 
   // Repeats, or 3 no-progress turns: step B, once. (repeats jump straight to B)
@@ -3562,9 +3901,12 @@ function runLoopGuardTurn_(session, nowMs) {
   }
 
   // In message flow with a no-progress turn that has not hit a ladder step yet:
-  // re-ask the name instead of falling back to "How can I help?"
+  // ask for whatever is still missing (D-20261120 fix 1: never the name once
+  // captured), or save and close politely when everything is in.
   if (g.messageFlow && !classified.progress) {
-    const reask = lines.nameAgain;
+    const nextLine = nextMessageFlowLine_(session);
+    if (nextLine.close) return finishLoopGuardHangup_(session, 'C', nextLine.reply, nowMs);
+    const reask = nextLine.reply;
     const guarded = applyLeoRepeatGuard_(session, reask, nowMs);
     if (guarded.hangUp) return finishLoopGuardHangup_(session, guarded.step || 'C', guarded.reply, nowMs);
     const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, guarded.reply, nowMs), {});
@@ -3580,7 +3922,7 @@ function maybeLoopGuardHardCap_(session, nowMs) {
   const caps = loopGuardCaps_(session);
   if (loopGuardElapsedMs_(session, nowMs) < caps.LOOP_HARD_CAP_MS) return null;
   const lines = loopGuardLines_(!!(session && session.isSpanish));
-  return finishLoopGuardHangup_(session, 'D', lines.C, nowMs);
+  return finishLoopGuardHangup_(session, 'D', stallCloseLine_(session), nowMs);
 }
 
 function interceptAfterUserTurn_(session, opts) {
@@ -3822,9 +4164,18 @@ function forceHangup_(session, ws, reason, detail, deps) {
     sendRelayRaw_(ws, { type: 'text', token: speakableReply_(line, session.isSpanish), last: true });
     if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: line });
   }
+  // D-20261120 fix 1: ALWAYS save the call (message and lead) before any close.
+  // Started now so it runs during the goodbye; postLeadToDashboard is once-per-call
+  // (session.leadPosted), so the later 'end' / 'close' handlers do not post twice.
+  const postFn = deps.postLead || (typeof postLeadToDashboard === 'function' ? postLeadToDashboard : null);
+  const saved = postFn
+    ? Promise.resolve().then(() => postFn(session)).catch((e) => { log.warn(`Forced hang-up: lead save error callSid=${sid}`); })
+    : Promise.resolve();
+  const saveWaitMs = deps.saveWaitMs != null ? deps.saveWaitMs : 8000;
 
   return new Promise((resolve) => {
     later(async () => {
+      await Promise.race([saved, new Promise((r) => later(r, saveWaitMs))]);
       sendRelayRaw_(ws, { type: 'end', handoffData: JSON.stringify({ reasonCode: 'forced-hangup', reason: reason }) });
       let rest = 'skipped';
       if (client && typeof client.calls === 'function' && /^CA[0-9a-f]{32}$/i.test(String(sid))) {
@@ -4109,6 +4460,9 @@ async function postLeadToDashboard(session) {
       // Spanish - every branch needs a noun, or it flags "hablar con el que va a vivir conmigo"
       + '|\\b(hablar|comunicarme|comunicar|comunique|comuniquen|contactar|pasar|pasarme) con (alguien|una persona|un representante|una representante|el gerente|la gerente|el encargado|la encargada|la oficina|un agente|el equipo)\\b'
       + '|\\bpersona real\\b'
+      // D-20261120 fix 2: "speak to management", "someone in charge", "quiero hablar con el gerente".
+      + '|\\b(speak|talk|talking|speaking) (to|with) (the )?(management|someone in charge|somebody in charge|the person in charge|person in charge)\\b'
+      + '|\\b(quiero|necesito|puedo) (hablar con )?(el |la |un |una )?(gerente|encargado|encargada)\\b'
       + '|\\b(quiero|necesito|puedo) (hablar con )?(un |una )?representante\\b'
       + '|\\bcon (un|una) representante\\b'
       + '|\\bque (alguien )?me llame\\b|\\bme puede(n)? llamar\\b|\\b(que me devuelvan|devolverme) la llamada\\b'
@@ -4142,6 +4496,15 @@ async function postLeadToDashboard(session) {
   if (session.loopGuard && session.loopGuard.exit && session.loopGuard._leadFields) {
     ai_action_final = session.loopGuard._leadFields.ai_action;
   }
+  // D-20261120 fix 3: tag non-lead calls for Viola, not as NMF sales leads.
+  let leadStatus = 'new';
+  const nonLead = isMaintenanceCall(session.conversation, {}) ? null : classifyNonLeadCall_(session.conversation);
+  if (nonLead) {
+    leadStatus = NONLEAD_LEAD_STATUS;
+    summary = 'NON-LEAD (' + nonLead.label + '). For ' + NONLEAD_ROUTE_TO + '. Not a sales lead.\n' + summary;
+    const rest = String(ai_action_final || '').replace(/^\s*NON-LEAD[^:]*:\s*/i, '');
+    ai_action_final = ('NON-LEAD FOR ' + NONLEAD_ROUTE_TO.toUpperCase() + ' (' + nonLead.label + '): ' + (rest || 'Take the message and call back.')).substring(0, 240);
+  }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
   if (ai_action_final) console.log(`Call action: ${ai_action_final}`);
@@ -4158,7 +4521,7 @@ async function postLeadToDashboard(session) {
         // Pass 12: language of the call, so a Spanish call is not stored as 'en' (lead-api.php defaults to 'en').
         language: session.isSpanish ? 'es' : 'en',
         summary,
-        status:   'new',
+        status:   leadStatus,
         ai_summary,
         ai_action: ai_action_final,
       }),
