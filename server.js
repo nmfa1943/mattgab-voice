@@ -168,7 +168,7 @@ const PROPERTIES = {
     phone: '602-997-2928 extension 1',
     ai_number: '520-600-6936',
     // hours / hours_es bound from OFFICE_HOURS after DEFAULT_CONTENT is declared
-    tour_link: 'https://calendly.com/leasing-mattgabmanagement/30min',
+    tour_link: 'https://mattgabmanagement.com/tour.php?property=nmf', // D-20261120-05: one booking page (old outside scheduler retired)
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
 2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. Let me have the office confirm current availability for you.
@@ -186,7 +186,7 @@ const PROPERTIES = {
     phone: '602-997-2928 extension 2',
     ai_number: '520-800-0759',
     // hours / hours_es bound from OFFICE_HOURS after DEFAULT_CONTENT is declared
-    tour_link: 'https://calendly.com/windsongphx-mattgabmanagement/30min',
+    tour_link: 'https://mattgabmanagement.com/tour.php?property=windsong', // D-20261120-05: one booking page (old outside scheduler retired)
     // APPLICATION LINK. This was locations=4 from 2026-07-16 until 2026-10-12,
     // and locations=4 is not a Windsong application - it is a Rent Manager
     // ERROR page ("Tenant Web Access has encountered an unexpected problem").
@@ -2595,7 +2595,7 @@ RULES
 - Professional and warm. Never "Hey there", "Awesome", "No problem".
 - NEVER re-ask something already said in this conversation.
 - NEVER state availability dates.
-- NEVER ask what time or day works for a tour. The caller picks from the Calendly link themselves.
+- NEVER ask what time or day works for a tour. The caller picks a time from the tour booking link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
 - Person requested: main office line ${property.phone}, ${property.hours}, and offer to take a message for a callback (see TAKE THE MESSAGE above). NEVER give this AI line (${property.ai_number}) as a way to reach staff — it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
@@ -4566,6 +4566,16 @@ function offersToText(text) {
 // ============================================================
 // DETECT SMS INTENT — order matters: tour BEFORE apply (fixes wrong-link bug)
 // ============================================================
+
+// D-20261120-05: every tour goes through the one booking page (tour.php).
+// Spanish callers get the Spanish page (lang=es). The base link already has
+// ?property=, so the language is appended with &.
+function tourLinkFor_(property, isSpanish) {
+  const base = String((property && property.tour_link) || '');
+  if (!base) return base;
+  if (!isSpanish) return base;
+  return base + (base.includes('?') ? '&' : '?') + 'lang=es';
+}
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
   // F-20261015-02. Accent-insensitive copy used for every test below. The model
@@ -4993,7 +5003,7 @@ fastify.register(async function(fastify) {
                   session.sent.push(intent);
                   const { property, to, from } = session;
                   if (intent === 'tour') {
-                    await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${property.tour_link}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
+                    await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${tourLinkFor_(property, session.isSpanish)}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
                   } else if (intent === 'apply') {
                     await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our leasing team will follow up with you. Reply STOP to unsubscribe.`);
                   } else if (intent === 'portal') {
