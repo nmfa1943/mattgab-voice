@@ -907,6 +907,48 @@ function callerTurnsText_(conversation) {
   return (conversation || []).filter(m => m && m.role === 'user').map(m => String(m.content || '')).join('\n');
 }
 
+// D-20261120-13: housing authority, housing program or caseworker calling to
+// place a client (voucher holder, participant, family) or asking about units,
+// availability, tours or applying. Jenea, Nov 20 2026: "we do take section 8
+// and housing authorities from city". These are leasing referrals, so Leo runs
+// the normal intake. Returns false for enforcement callers and for calls about
+// an existing tenancy (a current tenant, a balance, a court case, a complaint).
+// Inspection, HAP, recertification or payment calls count only when there is
+// also an explicit placement ask (client looking, availability, tour, apply).
+// FAIR HOUSING: this only decides routing. It never ranks programs or callers.
+function housingReferralCall_(conversation) {
+  const raw = callerTurnsText_(conversation);
+  if (!raw.trim()) return false;
+  const t = normalizeForMatch_(raw).replace(/[’']/g, '');
+  const selfIdLead = '\\b(im|i am|this is|calling from|calling with|calling on behalf of|i work for|i work with|i work at|soy|llamo de|llamo del|hablo de|hablo del|le llamo de|de parte de)\\b[^.?!\\n]{0,60}?\\b';
+  const referrerTerm = '(housing authority|housing department|housing program|housing programs|housing services|housing navigator|housing specialist|housing case manager|rehousing|re housing|hud vash|vash|home inc|maricopa|city of phoenix|the city|county|department of|human services|hsd|caseworker|case worker|case manager|social worker|la ciudad|el condado|departamento de|autoridad de vivienda|programa de vivienda|programas de vivienda|trabajador social|trabajadora social|administrador de casos|administradora de casos)';
+  const enforcementTerm = '(code enforcement|code compliance|neighborhood services|inspector|inspectora?|dcs|police|sheriff|constable|justice court|the court|process server|fire department|la corte|policia|alguacil)';
+  if (!new RegExp(selfIdLead + referrerTerm + '\\b').test(t)) return false;
+  if (new RegExp(selfIdLead + enforcementTerm + '\\b').test(t)) return false;
+  // About an existing tenancy or a dispute: Viola, not leasing.
+  const tenancy = /\b(your|current|existing) (tenants?|residents?)\b|\bone of your (tenants|residents)\b|\b(tenant|resident) (in|at|of|named|who lives|who lived)\b|\b(lives|living|lived) (there|at your|in your)\b|\b(court|hearing|subpoena|complaint|violation|citation|balance|owes?|owed|debt|collections?|welfare check|wellness check|police report)\b|\b(sus? inquilin[oa]s?|un inquilino suyo|una inquilina suya|vive (ahi|alli|en su)|vivia (ahi|alli|en su)|corte|audiencia|queja|violacion|multa|saldo|deuda|cobranza|reporte policial)\b/;
+  if (tenancy.test(t)) return false;
+  // Strong placement asks (EN and ES).
+  const who = '(client|clients|participant|participants|family|families|veteran|veterans|voucher holders?|someone|a person|people|household|households|cliente|clientes|clienta|clientas|participantes?|familias?|persona|personas|veteranos?)';
+  const strong = new RegExp(
+    '\\b(availability|available|vacanc(y|ies)|openings?|tours?|schedule a (tour|visit|showing)|showings?|apply|applying|application|applications|' +
+    'looking for (a |an )?(place|apartment|unit|units|home|housing|rental|(one|two|three|1|2|3)[ -]?(bed|bedroom|br))|' +
+    '(place|placing|house|housing|refer|referring|relocate|relocating) (a |my |our |one of our )?' + who + '|' +
+    who + '\\b[^.?!\\n]{0,50}\\b(looking|needs?|searching|in need|wants?|interested|ready to (move|lease|rent))|' +
+    '(accept|take|work with|do you accept|do you take)\\b[^.?!\\n]{0,25}\\b(vouchers?|section 8|housing choice|rental assistance|hud|vash|housing authority)|' +
+    'disponibles?|disponibilidad|vacantes?|recorrido|aplicar|solicitud|' +
+    'busca(ndo|mos)? (un |una )?(apartamento|departamento|lugar|vivienda|casa)|' +
+    '(ubicar|colocar|alojar|referir|reubicar) (a )?(un |una |mi |nuestra |nuestro |nuestros |nuestras )?' + who + '|' +
+    who + '\\b[^.?!\\n]{0,50}\\b(busca|buscan|necesita|necesitan|quiere|quieren|interesad[oa]s?)|' +
+    '(aceptan|toman|trabajan con)\\b[^.?!\\n]{0,25}\\b(vales?|vouchers?|seccion 8|asistencia|autoridad de vivienda))\\b');
+  // Weaker leasing asks: bedroom size or price, from a self-identified program caller.
+  const weak = /\b((one|two|three|1|2|3)[ -]?(bed|beds|bedroom|bedrooms|br)|how much (is|are|for)|what (is|are) (the )?(rent|rents|price|prices)|(una|dos|tres|1|2|3) recamaras?|cuanto (cuesta|es)|precio|precios)\b/;
+  // Program paperwork about a specific unit: needs a strong placement ask.
+  const paperwork = /\b(inspection|inspections|inspect|inspected|hqs|reinspection|re inspection|hap|recert\w*|payment|payments|rent increase|rent change|tenant portion|abatement|notice|inspeccion|inspecciones|pago|pagos|recertificacion|aumento de renta|aviso)\b/;
+  if (strong.test(t)) return true;
+  return weak.test(t) && !paperwork.test(t);
+}
+
 function classifyNonLeadCall_(conversation) {
   const raw = callerTurnsText_(conversation);
   if (!raw.trim()) return null;
@@ -917,10 +959,23 @@ function classifyNonLeadCall_(conversation) {
   const aboutUs = /\b(you guys|your company|your office|mattgab|matt gab|the property|ustedes|su compania|su oficina)\b[^.?!\n]{0,60}\b(collections?|credit report|reporte de credito|cobranza)\b|\b(collections?|credit report|reporte de credito|cobranza)\b[^.?!\n]{0,60}\b(you guys|your company|mattgab|matt gab|ustedes)\b/;
   if ((former.test(t) && money.test(t)) || aboutUs.test(t)) return { kind: 'former_tenant', label: 'former resident balance or collections' };
   // City, agency or caseworker, identified by the caller about themselves.
-  const agencyTerm = '(city of phoenix|the city|code enforcement|code compliance|neighborhood services|inspector|caseworker|case worker|case manager|social worker|human services|hsd|housing authority|department of|county|dcs|police|sheriff|constable|justice court|the court|process server|fire department|la ciudad|trabajador social|trabajadora social|inspectora?|departamento de|la corte|policia|alguacil)';
-  const selfId = new RegExp('\\b(im|i am|this is|calling from|calling with|calling on behalf of|i work for|i work with|i work at|soy|llamo de|llamo del|hablo de|hablo del|le llamo de|de parte de)\\b[^.?!\\n]{0,60}?\\b' + agencyTerm + '\\b');
+  // D-20261120-13 (Jenea, Nov 20: "we do take section 8 and housing
+  // authorities from city"): a housing authority, housing program or
+  // caseworker placing a client is a LEASING REFERRAL, not a non-lead. See
+  // housingReferralCall_. Enforcement callers (code enforcement, inspectors,
+  // police, courts, DCS and the like) and agency calls that are not about
+  // renting still go to Viola.
+  const enforcementTerm = '(code enforcement|code compliance|neighborhood services|inspector|inspectora?|dcs|police|sheriff|constable|justice court|the court|process server|fire department|la corte|policia|alguacil)';
+  const agencyTerm = '(city of phoenix|the city|code enforcement|code compliance|neighborhood services|inspector|caseworker|case worker|case manager|social worker|human services|hsd|housing authority|department of|county|dcs|police|sheriff|constable|justice court|the court|process server|fire department|la ciudad|trabajador social|trabajadora social|inspectora?|departamento de|la corte|policia|alguacil|autoridad de vivienda|programa de vivienda)';
+  const selfIdLead = '\\b(im|i am|this is|calling from|calling with|calling on behalf of|i work for|i work with|i work at|soy|llamo de|llamo del|hablo de|hablo del|le llamo de|de parte de)\\b[^.?!\\n]{0,60}?\\b';
+  const selfId = new RegExp(selfIdLead + agencyTerm + '\\b');
+  const selfIdEnforcement = new RegExp(selfIdLead + enforcementTerm + '\\b');
   const ownWorker = /\b(my|mi) (caseworker|case worker|case manager|social worker|trabajador(a)? social)\b/;
-  if (selfId.test(t) && !ownWorker.test(t)) return { kind: 'agency', label: 'city, agency or caseworker call' };
+  const referral = housingReferralCall_(conversation);
+  if (selfId.test(t) && !ownWorker.test(t) && (selfIdEnforcement.test(t) || !referral)) return { kind: 'agency', label: 'city, agency or caseworker call' };
+  // A housing program or caseworker placing a client is a lead; their
+  // client's eviction history is a screening matter for staff, not a case call.
+  if (referral) return null;
   // Eviction questions from a third party or about a case (not a prospect's screening question).
   const eviction = /\b(eviction|evict|evicted|desalojo|desalojar)\b/;
   const caseWords = /\b(request|notice|clarif\w*|case|hearing|filing|filed|paperwork|writ|judgment|aviso|demanda|orden|audiencia)\b/;
@@ -943,6 +998,20 @@ function nonLeadHint_(conversation, opts) {
     'Calls like this go to Viola, so take a message for Viola. If you have not already said it, say: "' + msg + '" ' +
     'Then, one question per turn, ask ONLY for what is still missing (NEVER re-ask a name you already have): what they want you to tell Viola, and whether the number they are calling from is the best callback number. ' +
     'When you have it, confirm once: "' + confirm + '" If they ask for a person, give the office line with Viola\'s extension per the STAFF-TO-EXTENSION MAPPING and offer the message.';
+}
+
+// D-20261120-13: per-turn hint for a housing program or caseworker referral.
+function housingReferralHint_(conversation, opts) {
+  opts = opts || {};
+  if (isMaintenanceCall(conversation, { recentUserTurns: 3 })) return '';
+  if (classifyNonLeadCall_(conversation) || !housingReferralCall_(conversation)) return '';
+  const line = opts.isSpanish
+    ? 'Con gusto. Aceptamos vales de la Sección 8, HOME Inc. y programas de autoridades de vivienda de la ciudad y del condado, incluida la Autoridad de Vivienda del Condado de Maricopa.'
+    : 'Happy to help. We accept Section 8 vouchers, HOME Inc., and city and county housing authority programs, including the Housing Authority of Maricopa County.';
+  return '\n\nTHIS TURN ONLY: this caller is a housing program, housing authority or caseworker placing a client. This IS a leasing lead: do NOT take a message for Viola and do NOT treat it as an agency call. ' +
+    'Answer what they asked with the same prices, availability and process you give every caller. If you have not already said it, you may say: "' + line + '" ' +
+    'The client is the prospect: run the normal PROSPECT INTAKE about the client (bedroom size, move-in timing, how they heard about us), one question per turn, then offer the tour link or the waiting list. Get the caller\'s first name before texting a link, as usual. ' +
+    'Do NOT ask about the client\'s income, job, disability, family or background, and NEVER say we prefer any program, agency, income source or employed people over others. Screening and approval are done by our team, not on this call.';
 }
 
 // Fix 4 (lead 200102): prospect intake. Unit size, move-in date and how they
@@ -1053,6 +1122,7 @@ function buildTurnSystemHints(conversation, opts) {
   opts = opts || {};
   let suffix = '';
   suffix += nonLeadHint_(conversation, opts);
+  suffix += housingReferralHint_(conversation, opts);
   suffix += prospectIntakeHint_(conversation, opts);
   suffix += petFollowupHint_(conversation, opts);
   suffix += nameSpellHint_(conversation, opts);
@@ -2466,6 +2536,11 @@ English and in Spanish, because it read the list from the top. The decision has 
 
 SECTION 8 AND HOME INC:
 - Both NMFA and Windsong accept Section 8 vouchers and HOME Inc.
+- Both NMFA and Windsong also welcome city and county housing authority programs, including the Housing Authority of Maricopa County (callers may say "Maricopa County Housing Authority") and the City of Phoenix Housing Department, and other government rental assistance programs. When it is relevant (a caller mentions a voucher, a housing authority, a housing program or rental assistance, or a caseworker is placing a client), mention it warmly:
+  - English: "We work with Section 8, HOME Inc., and city and county housing authority programs, including the Housing Authority of Maricopa County, so you are very welcome to apply."
+  - Spanish (formal usted): "Trabajamos con la Sección 8, HOME Inc. y los programas de las autoridades de vivienda de la ciudad y del condado, incluida la Autoridad de Vivienda del Condado de Maricopa, así que con gusto puede aplicar."
+- HOUSING AUTHORITY OR CASEWORKER PLACING A CLIENT: a caller from a housing authority, a housing program, or a caseworker or social worker asking about units, availability, rent, tours or applying for a client IS a leasing lead. Help them like any prospect and run the normal PROSPECT INTAKE about the client. Do not send them to Viola as an agency call. Inspections, a current tenant, payments, complaints, court or eviction cases are NOT leasing: take a message for Viola.
+- SOURCE OF INCOME IS PROTECTED (Phoenix City Code 18-11.16): NEVER say we prefer, favor or prioritize any program, agency, voucher, income source, or people who are employed, over anyone else. NEVER rank programs, never discourage any lawful source of income, and never ask whether the caller or their client works. Every applicant goes through the same process, and our leasing team does the screening. Never say an applicant is approved or denied.
 - If a caller describes financial hardship (phrases like "make ends meet", "tight budget", "low income", "fixed income", "can barely afford", "struggling", "Section 8", "voucher", "rental assistance"), respond warmly and proactively mention that we accept Section 8 and HOME Inc. Say something like: "Something worth knowing is that we accept Section 8 vouchers and HOME Inc., which can make a real difference."
 - Do not immediately pitch units or prices after a hardship mention. Keep the conversation open.
 - A caller saying they are a single parent is NOT a hardship signal and must not change your reply. Be warm, say nothing about their family, and answer what they asked. If they separately say money is tight, the financial phrases above already cover it.
@@ -4504,6 +4579,10 @@ async function postLeadToDashboard(session) {
     summary = 'NON-LEAD (' + nonLead.label + '). For ' + NONLEAD_ROUTE_TO + '. Not a sales lead.\n' + summary;
     const rest = String(ai_action_final || '').replace(/^\s*NON-LEAD[^:]*:\s*/i, '');
     ai_action_final = ('NON-LEAD FOR ' + NONLEAD_ROUTE_TO.toUpperCase() + ' (' + nonLead.label + '): ' + (rest || 'Take the message and call back.')).substring(0, 240);
+  }
+  // D-20261120-13: flag housing program or caseworker referrals for staff. Status stays 'new' (a lead).
+  if (!nonLead && !isMaintenanceCall(session.conversation, {}) && housingReferralCall_(session.conversation)) {
+    summary = 'HOUSING PROGRAM REFERRAL (caller is a housing authority, housing program or caseworker; their client is the prospect).\n' + summary;
   }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
