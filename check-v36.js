@@ -293,5 +293,8 @@ test('invariants: no spoken 1700 or 1900, no Limited-time, markdown strip, lead 
   assert.equal(src.includes('function extractOriginalSource'), false);
   assert.equal(src.includes('RENT_DUE_REPLY_'), false);
   assert.equal(src.includes('original_source'), false);
-  assert.match(src, /Ask "how did you hear about us" only if the conversation is already flowing/);
+  // D-20261120 fix 4 (Jenea, Nov 20): how-heard is now part of prospect intake,
+  // replacing the older "only if the conversation is already flowing" rule.
+  assert.match(src, /PROSPECT INTAKE \(Jenea, Nov 20 2026\)/);
+  assert.match(src, /\(3\) how they heard about us/);
 });
