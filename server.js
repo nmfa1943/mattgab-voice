@@ -73,8 +73,8 @@ const OFFICE_HOURS = {
       daysEs: ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'] }
   },
   windsong: {
-    // Source: Kiko, 2:12 PM MST Nov 12, 2026 — pending confirmation.
-    // These WindSong hours did not come from Jenea's quote.
+    // Source: Jenea, 9:26 AM MST Nov 23, 2026 (D-20261123-03): WindSong is Mon-Fri 9-5,
+    // Sat 10-3, closed Sunday. Confirmed; matches the values below and the content store.
     en: 'Monday through Friday, nine A M to five P M, Saturday ten A M to three P M, closed Sunday.',
     es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, y los sábados de diez de la mañana a tres de la tarde. Los domingos está cerrada.',
     enWritten: 'Mon–Fri 9 AM–5 PM, Saturday 10 AM–3 PM, Sunday closed',
@@ -86,6 +86,51 @@ const OFFICE_HOURS = {
       daysEs: ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'] }
   }
 };
+
+// ============================================================
+// D-20261123-03: office holidays. Closed ALL DAY (America/Phoenix) at both
+// properties. Source: Jenea, 9:26 AM MST Nov 23, 2026: "We will be closed on
+// Thanksgiving and christmas day".
+// To add a day: put 'YYYY-MM-DD' in shared (both properties) or in nmf /
+// windsong (one property), or set the optional Railway variable
+// LEO_OFFICE_HOLIDAYS, a comma list like "2026-12-31,windsong:2027-01-01".
+// rules are computed every year: thanksgiving = 4th Thursday of November,
+// christmas = December 25.
+// ============================================================
+const OFFICE_HOLIDAYS = {
+  rules: ['thanksgiving', 'christmas'],
+  shared: [],
+  nmf: [],
+  windsong: []
+};
+const HOLIDAY_NAMES_ = {
+  thanksgiving: { en: 'Thanksgiving', es: 'el Día de Acción de Gracias' },
+  christmas: { en: 'Christmas Day', es: 'el Día de Navidad' },
+  date: { en: 'the holiday', es: 'el día festivo' }
+};
+function parseHolidayEnv_(raw) {
+  const out = { shared: [], nmf: [], windsong: [] };
+  String(raw || '').split(',').map(x => x.trim().toLowerCase()).filter(Boolean).forEach(item => {
+    const m = item.match(/^(?:(nmf|windsong):)?(\d{4}-\d{2}-\d{2})$/);
+    if (m) out[m[1] || 'shared'].push(m[2]);
+  });
+  return out;
+}
+const OFFICE_HOLIDAYS_ENV_ = parseHolidayEnv_(process.env.LEO_OFFICE_HOLIDAYS);
+function thanksgivingDay_(year) {
+  const w = new Date(Date.UTC(year, 10, 1)).getUTCDay();
+  return 1 + ((4 - w + 7) % 7) + 21;
+}
+// y, m (1-12), d are a Phoenix calendar date. Returns { key, en, es } or null.
+function officeHolidayOn_(propKey, y, m, d) {
+  const rules = OFFICE_HOLIDAYS.rules || [];
+  if (rules.indexOf('thanksgiving') !== -1 && m === 11 && d === thanksgivingDay_(y)) return Object.assign({ key: 'thanksgiving' }, HOLIDAY_NAMES_.thanksgiving);
+  if (rules.indexOf('christmas') !== -1 && m === 12 && d === 25) return Object.assign({ key: 'christmas' }, HOLIDAY_NAMES_.christmas);
+  const ymd = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  const lists = [OFFICE_HOLIDAYS.shared, OFFICE_HOLIDAYS[propKey], OFFICE_HOLIDAYS_ENV_.shared, OFFICE_HOLIDAYS_ENV_[propKey]];
+  if (lists.some(l => Array.isArray(l) && l.indexOf(ymd) !== -1)) return Object.assign({ key: 'date' }, HOLIDAY_NAMES_.date);
+  return null;
+}
 
 function hoursPropertyKey_(property) {
   if (property == null || property === '') return null;
@@ -1236,6 +1281,11 @@ function officeTurnHints_(conversation, opts) {
     out += '\n\nTHIS TURN ONLY: the caller asked for a person. Offer the message first and say whether the office is open right now. Say: "' + officeHandoffLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '"';
   } else if (OFFICE_OPEN_Q_RE_.test(norm)) {
     out += '\n\nTHIS TURN ONLY: the caller asked whether the office is open. Answer that first, exactly: "' + officeStatusLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '" Then offer to take a message or help with anything else, in one short question.';
+  }
+  // D-20261123-03: on an office holiday, Leo must not suggest coming in today.
+  const todaySt = officeStatusNow_(opts.property || null, opts.nowMs);
+  if (todaySt.state === 'holiday') {
+    out += '\n\nTODAY IS AN OFFICE HOLIDAY: the office is closed all day today. If the caller asks about the office, its hours, coming in, or talking to someone today, say: "' + (opts.isSpanish ? todaySt.es : todaySt.en) + '" and offer to take a message. Do not suggest visiting or calling the office today.';
   }
   return out;
 }
@@ -3671,8 +3721,8 @@ function loopGuardLinesBase_(isSpanish) {
 // D-20261123-01 fix 2 (F-20260911-02 repeat; leads 200106, 200111, 200114,
 // 200117): is the office open RIGHT NOW? Weekly schedule per property, in
 // America/Phoenix time (no daylight saving, always UTC-7). Same hours as
-// OFFICE_HOURS above. Holidays are not known here, so a holiday reads as a
-// normal day; the message offer is always made either way.
+// OFFICE_HOURS above. D-20261123-03: OFFICE_HOLIDAYS days are closed all day,
+// and "it opens ..." skips them. The message offer is always made either way.
 // ============================================================
 const PHX_OFFSET_MS_ = -7 * 3600 * 1000;
 const HOUR_WORDS_EN_ = { 9: 'nine A M', 10: 'ten A M', 15: 'three P M', 17: 'five P M', 18: 'six P M' };
@@ -3683,12 +3733,14 @@ function officeStatusNow_(property, nowMs) {
   const d = new Date((nowMs == null ? Date.now() : Number(nowMs)) + PHX_OFFSET_MS_);
   const day = d.getUTCDay();               // 0 Sun .. 6 Sat, Phoenix local
   const h = d.getUTCHours() + d.getUTCMinutes() / 60;
-  const openRange = (day >= 1 && day <= 5) ? sch.weekday : (day === 6 ? sch.saturday : sch.sunday);
+  const holidayAt_ = (add) => { const x = new Date(d.getTime() + add * 86400000); return officeHolidayOn_(key, x.getUTCFullYear(), x.getUTCMonth() + 1, x.getUTCDate()); };
+  const holiday = holidayAt_(0);
+  const openRange = holiday ? null : ((day >= 1 && day <= 5) ? sch.weekday : (day === 6 ? sch.saturday : sch.sunday));
   const inR = (r) => !!r && h >= r[0] && h < r[1];
   if (inR(openRange)) {
     return { state: 'open', en: 'Right now the office is open, until ' + HOUR_WORDS_EN_[openRange[1]] + '.', es: 'En este momento la oficina está abierta, hasta ' + HOUR_WORDS_ES_[openRange[1]] + '.' };
   }
-  if (day >= 1 && day <= 5 && inR(sch.weekdayAppt) && sch.apptNowEn) {
+  if (!holiday && day >= 1 && day <= 5 && inR(sch.weekdayAppt) && sch.apptNowEn) {
     return { state: 'appointment', en: sch.apptNowEn, es: sch.apptNowEs };
   }
   // Closed: when does it open next?
@@ -3697,12 +3749,16 @@ function officeStatusNow_(property, nowMs) {
     const dd = (day + add) % 7;
     const r = (dd >= 1 && dd <= 5) ? sch.weekday : (dd === 6 ? sch.saturday : sch.sunday);
     if (!r) continue;
-    if (add === 0 && h >= r[0]) continue;
+    if (add === 0 && (holiday || h >= r[0])) continue;
+    if (add > 0 && holidayAt_(add)) continue;
     const names = sch.daysEn, namesEs = sch.daysEs;
     const whenEn = add === 0 ? 'today' : (add === 1 ? 'tomorrow' : names[dd]);
     const whenEs = add === 0 ? 'hoy' : (add === 1 ? 'mañana' : namesEs[dd]);
     nextEn = ' It opens ' + whenEn + ' at ' + HOUR_WORDS_EN_[r[0]] + '.';
     nextEs = ' Abre ' + whenEs + ' a ' + HOUR_WORDS_ES_[r[0]] + '.';
+  }
+  if (holiday) {
+    return { state: 'holiday', holiday: holiday.key, en: 'Today the office is closed all day for ' + holiday.en + '.' + nextEn, es: 'Hoy la oficina está cerrada todo el día por ' + holiday.es + '.' + nextEs };
   }
   const satNote = (day === 6 && sch.saturdayAppt) ? { en: sch.satNoteEn, es: sch.satNoteEs } : { en: '', es: '' };
   return { state: 'closed', en: 'Right now the office is closed.' + satNote.en + nextEn, es: 'En este momento la oficina está cerrada.' + satNote.es + nextEs };
