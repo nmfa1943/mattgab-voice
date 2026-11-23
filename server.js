@@ -62,7 +62,15 @@ const OFFICE_HOURS = {
     en: "Our office is open Monday through Friday, nine A M to five P M, with appointments available from five to six P M. Saturdays are by appointment, and we're closed on Sundays.",
     es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, con citas disponibles de cinco a seis de la tarde. Los sábados son con cita previa y los domingos está cerrada.',
     enWritten: 'Mon–Fri 9 AM–5 PM, appointments 5–6 PM; Saturday by appointment; Sunday closed',
-    esWritten: 'Lun–vie 9 AM–5 PM, citas de 5–6 PM; sábados con cita previa; domingo cerrado'
+    esWritten: 'Lun–vie 9 AM–5 PM, citas de 5–6 PM; sábados con cita previa; domingo cerrado',
+    // D-20261123-01: the same hours as a weekly schedule (24 h clock, America/Phoenix),
+    // so Leo can say whether the office is open RIGHT NOW. Keep in step with en/es above.
+    schedule: { weekday: [9, 17], weekdayAppt: [17, 18], saturday: null, saturdayAppt: true, sunday: null,
+      apptNowEn: 'Right now the office is closed for walk-ins. From five to six P M it is open by appointment only.',
+      apptNowEs: 'En este momento la oficina está cerrada sin cita. De cinco a seis de la tarde atiende solo con cita previa.',
+      satNoteEn: ' Saturdays are by appointment only.', satNoteEs: ' Los sábados son solo con cita previa.',
+      daysEn: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+      daysEs: ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'] }
   },
   windsong: {
     // Source: Kiko, 2:12 PM MST Nov 12, 2026 — pending confirmation.
@@ -70,7 +78,12 @@ const OFFICE_HOURS = {
     en: 'Monday through Friday, nine A M to five P M, Saturday ten A M to three P M, closed Sunday.',
     es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, y los sábados de diez de la mañana a tres de la tarde. Los domingos está cerrada.',
     enWritten: 'Mon–Fri 9 AM–5 PM, Saturday 10 AM–3 PM, Sunday closed',
-    esWritten: 'Lun–vie 9 AM–5 PM, sábado 10 AM–3 PM, domingo cerrado'
+    esWritten: 'Lun–vie 9 AM–5 PM, sábado 10 AM–3 PM, domingo cerrado',
+    // D-20261123-01: weekly schedule for "open right now" (24 h clock, America/Phoenix).
+    schedule: { weekday: [9, 17], weekdayAppt: null, saturday: [10, 15], saturdayAppt: false, sunday: null,
+      apptNowEn: '', apptNowEs: '', satNoteEn: '', satNoteEs: '',
+      daysEn: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+      daysEs: ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'] }
   }
 };
 
@@ -896,6 +909,20 @@ function isBareMessageRequest_(text) {
 // another existing category; anything else falls back to the default.
 // OPEN QUESTION for Jenea: is 'resident' right for city and agency calls too?
 const NONLEAD_ALLOWED_STATUSES_ = ['resident', 'vendor', 'maintenance', 'transfer'];
+// D-20261123-01 fix 4 (lead 200116): current residents are non-leads for Viola.
+// OPEN QUESTION for Jenea (category / status for residents). Until she decides,
+// LEO_RESIDENT_STATUS (Railway variable, optional) picks one of the allowed
+// statuses above; unset or anything else = 'resident', the current default.
+const RESIDENT_LEAD_STATUS = NONLEAD_ALLOWED_STATUSES_.indexOf(String(process.env.LEO_RESIDENT_STATUS || '').trim().toLowerCase()) !== -1
+  ? String(process.env.LEO_RESIDENT_STATUS).trim().toLowerCase()
+  : 'resident';
+// D-20261123-01 fix 4: obvious spam (robocalls, sales pitches to the business,
+// scams) is saved with status 'spam' (an existing dashboard status that the
+// welcome texts and follow-ups already skip), never as a sales lead.
+// LEO_SPAM_STATUS may pick 'spam' or 'vendor'; anything else = 'spam'.
+const SPAM_LEAD_STATUS = ['spam', 'vendor'].indexOf(String(process.env.LEO_SPAM_STATUS || '').trim().toLowerCase()) !== -1
+  ? String(process.env.LEO_SPAM_STATUS).trim().toLowerCase()
+  : 'spam';
 const NONLEAD_LEAD_STATUS = NONLEAD_ALLOWED_STATUSES_.indexOf(String(process.env.LEO_NONLEAD_STATUS || '').trim().toLowerCase()) !== -1
   ? String(process.env.LEO_NONLEAD_STATUS).trim().toLowerCase()
   : 'resident';
@@ -981,7 +1008,38 @@ function classifyNonLeadCall_(conversation) {
   const caseWords = /\b(request|notice|clarif\w*|case|hearing|filing|filed|paperwork|writ|judgment|aviso|demanda|orden|audiencia)\b/;
   const screening = /\b(do you|would you|can i|will you|could i|would i|aceptan|puedo)\b[^.?!\n]{0,50}\b(accept|approve|rent|apply|qualify|aplicar|rentar|calificar)\b|\b(i have|i had|tengo|tuve) (an |a |un )?(eviction|desalojo)\b/;
   if (eviction.test(t) && caseWords.test(t) && !screening.test(t)) return { kind: 'agency', label: 'eviction question' };
+  // D-20261123-01 fix 4 (lead 200116): the caller says they live here now.
+  if (currentResidentCall_(conversation)) return { kind: 'resident', label: 'current resident' };
   return null;
+}
+
+// D-20261123-01 fix 4: a current resident, in the caller's own words ("I live
+// there", "I'm a resident here", "I want to transfer to a two bedroom"). Kept
+// narrow on purpose: "my lease ends", "my apartment" or "I live here in
+// Phoenix" are prospects, not residents. Maintenance calls are routed before
+// this (to Jose) and never reach it.
+function currentResidentCall_(conversation) {
+  const raw = callerTurnsText_(conversation);
+  if (!raw.trim()) return false;
+  const t = normalizeForMatch_(raw).replace(/[’']/g, '');
+  const en = /\b(i|we) (already |currently |do |actually )?live (there|here|at north mountain|at windsong|at your (property|place|complex|apartments))\b(?! in\b| near\b| by\b| close\b| around\b)|\b(im|i am|we are|were) (a |an )?(current |existing )?(resident|residents|tenant|tenants)( here| there| at| of| with)?\b|\b(current|existing) (resident|tenant)\b|\btransfer(ring)?( over)? (to|into) (a |another |the |a different |a bigger |a larger |a smaller )?(unit|apartment|one bedroom|two bedroom|three bedroom|(1|2|3) bedroom)\b|\bunit transfer\b/;
+  const es = /\b(ya |actualmente )?vivo (ahi|alli|aqui|en north mountain|en windsong|en (su|sus) (propiedad|apartamentos|departamentos))\b(?! en\b| cerca\b| por\b)|\bsoy (residente|inquilin[oa])\b|\b(residente|inquilin[oa]) (actual|de aqui|de ahi)\b|\b(transferirme|cambiarme|mudarme) (a|de) (otro|otra|un|una) (apartamento|departamento|unidad)\b/;
+  if (!(en.test(t) || es.test(t))) return false;
+  // "I used to live there" / "I lived there" are former residents, handled above.
+  if (/\b(used to live|i lived|we lived|ya no vivo|vivia)\b/.test(t) && !/\b(i|we) (already |currently )?live\b|\bvivo\b/.test(t)) return false;
+  return true;
+}
+
+// D-20261123-01 fix 4: obvious spam, robocall or sales pitch to the business.
+// Strong signals only; any leasing words from the caller veto it, so a real
+// prospect is never thrown away.
+const SPAM_STRONG_RE_ = /\b(google (business )?(listing|profile)|your business (listing|profile)|verify your (business|listing)|business listing|extended (car |auto |vehicle )?warranty|vehicle warranty|car warranty|merchant services|credit card processing|processing fees|business (loan|funding)|working capital|seo services|search engine optimization|rank (you|your (business|website)) (on|higher)|amazon affiliate|affiliate marketing|crypto(currency)?|bitcoin|forex|investment opportunity|gift cards?|you (have|ve) (won|been selected)|this is an? (automated|recorded|pre ?recorded) (message|call)|press (one|1) to (speak|talk|be connected|claim|continue)|student loan forgiveness|final notice (about|on) your)\b/;
+const SPAM_LEASING_VETO_RE_ = /\b(apartment|apartments|bedroom|bedrooms|rent|renting|lease|leasing|tour|unit|units|apply|application|available|availability|move in|moving|section 8|voucher|departamento|apartamento|recamaras?|renta|disponible|mudarme)\b/;
+function spamCall_(conversation) {
+  const raw = callerTurnsText_(conversation);
+  if (!raw.trim()) return false;
+  const t = normalizeForMatch_(raw).replace(/[’']/g, '');
+  return SPAM_STRONG_RE_.test(t) && !SPAM_LEASING_VETO_RE_.test(t);
 }
 
 function nonLeadHint_(conversation, opts) {
@@ -1030,10 +1088,53 @@ function prospectIntakeState_(conversation) {
   return { prospect, unit, moveIn, heard, askedUnit, askedMoveIn, askedHeard, offeredNext };
 }
 
+// D-20261123-01 fix 3 (leads 200112, 200120): the move-in date and how they
+// heard about us were still missing when the call closed. When Leo's reply to a
+// prospect is a close (the CLOSING template, a goodbye, or "anything else I can
+// help you with?") and one of those two is still missing and was never asked,
+// the close is replaced by that ONE question. Each is asked at most once, so a
+// caller who skips it is never pushed. Not for residents, agencies,
+// maintenance, message or office-handoff calls.
+const INTAKE_CLOSE_RE_ = /(looking forward to meeting you|reach out anytime|thank you for calling|thanks for calling|have a (great|good|nice|wonderful) (day|night|evening|afternoon|weekend)|\bgoodbye\b|\bbye\b|espero conocerle|gracias por (su )?llamada|gracias por llamar|que tenga (un )?(buen|excelente|lindo)|\badi[oó]s\b)/i;
+const INTAKE_ANYTHING_ELSE_RE_ = /(is there )?anything else (i can|i could|that i can) help (you )?with[^?]*\?|algo m[aá]s en (lo )?que (le )?(pueda|puedo) ayudar[^?]*\?/i;
+function ensureIntakeBeforeClose_(text, session, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim() || !session) return t;
+  const conv = session.conversation || [];
+  if (!conv.some(m => m && m.role === 'user')) return t;
+  if (isMaintenanceCall(conv, { recentUserTurns: 3 })) return t;
+  if (classifyNonLeadCall_(conv) || spamCall_(conv)) return t;
+  const g = session.loopGuard;
+  if (g && (g.messageFlow || g.hungUp)) return t;
+  if (officeLineAlreadyGiven_(session)) return t;
+  const lastUser = recentUserTurns_(conv, 1).join(' ');
+  if (officeRequestIntent_(lastUser) || isBareMessageRequest_(lastUser)) return t;
+  const st = prospectIntakeState_(conv.concat([{ role: 'assistant', content: t }]));
+  if (!st.prospect) return t;
+  const asked = session.intakeCloseAsked || (session.intakeCloseAsked = {});
+  let want = '';
+  if (!st.moveIn && !st.askedMoveIn && !asked.moveIn) want = 'moveIn';
+  else if (!st.heard && !st.askedHeard && !asked.heard) want = 'heard';
+  if (!want) return t;
+  const sents = splitSentences_(t);
+  const isClose = (sn) => INTAKE_CLOSE_RE_.test(sn) || INTAKE_ANYTHING_ELSE_RE_.test(sn);
+  if (!sents.some(isClose)) return t;
+  // Any other question in the reply (for example a name or consent ask) wins; leave it alone.
+  if (sents.some(sn => /\?/.test(sn) && !isClose(sn))) return t;
+  const es = replyIsSpanish_(t, !!(opts.isSpanish || session.isSpanish));
+  const q = want === 'moveIn'
+    ? (es ? 'Antes de despedirnos, ¿para cuándo piensa mudarse?' : 'Before you go, when are you looking to move in?')
+    : (es ? 'Antes de despedirnos, ¿cómo se enteró de nosotros?' : 'Before you go, how did you hear about us?');
+  asked[want] = true;
+  const kept = sents.filter(sn => !isClose(sn));
+  return (kept.length ? kept.join(' ') + ' ' : '') + q;
+}
+
 function prospectIntakeHint_(conversation, opts) {
   opts = opts || {};
   if (isMaintenanceCall(conversation, { recentUserTurns: 3 })) return '';
-  if (classifyNonLeadCall_(conversation)) return '';
+  if (classifyNonLeadCall_(conversation) || spamCall_(conversation)) return '';
   const lastUser = recentUserTurns_(conversation, 1).join(' ');
   if (!lastUser || officeRequestIntent_(lastUser) || isBareMessageRequest_(lastUser)) return '';
   const st = prospectIntakeState_(conversation);
@@ -1050,7 +1151,7 @@ function prospectIntakeHint_(conversation, opts) {
   if (!st.heard && !st.askedHeard) missing.push('"' + q.heard + '"');
   if (missing.length) {
     return '\n\nTHIS TURN ONLY: this is a leasing prospect. FIRST answer what they just asked. Then, as your one question, ask the FIRST of these that is still missing: ' + missing.join(' then ') +
-      '. Ask each one only once in the call; if they skip it, move on. Never hold back a price, availability or the tour link for these questions.';
+      '. Ask each one only once in the call; if they skip it, move on. Both the move-in date and how they heard about us MUST be asked before the call ends, even after the tour link is sent (D-20261123-01). Never hold back a price, availability or the tour link for these questions.';
   }
   if (!st.offeredNext) {
     return '\n\nTHIS TURN ONLY: this prospect has given (or skipped) the bedroom size, move-in timing and how they heard about us. After you answer what they just asked, offer the next step: the tour link for an AVAILABLE unit type, or the waiting list per the WAITLIST rule if the type they want is not available now (for example the three bedroom). Ask consent before texting any link.';
@@ -1118,9 +1219,31 @@ function nameSpellHint_(conversation, opts) {
   return '\n\nTHIS TURN ONLY: the name you just heard did not come through clearly. Ask ONCE, and only this: "' + line + '"';
 }
 
+// D-20261123-01 fix 2: model-path backstops for the office handoff.
+// (a) "Is the office open / closed?" gets the open-right-now line, not the weekly hours alone (lead 200114).
+// (b) a repeat ask for a person, after the office line was given, goes straight to the message.
+const OFFICE_OPEN_Q_RE_ = /\b(is|are) (the |your )?(office|you|you guys|yall|leasing office|leasing) (open|closed|still open|closing)\b|\b(open|closed) (right now|now|today|yet)\b|\bwhat time (do|does) (you|the office|it) (close|open)\b|\bwhen (do|does) (you|the office) (close|open)\b|\besta (abierta|cerrada) la oficina\b|\bla oficina esta (abierta|cerrada)\b|\b(estan|esta) abiert[oa]s?\b|\ba que hora (cierran|abren)\b/;
+function officeTurnHints_(conversation, opts) {
+  opts = opts || {};
+  const lastUser = recentUserTurns_(conversation, 1).join(' ');
+  if (!lastUser) return '';
+  const fakeSession = { property: opts.property || null, conversation: conversation || [], isSpanish: !!opts.isSpanish };
+  const norm = normalizeLoopText_(lastUser);
+  let out = '';
+  if (officeRequestIntent_(lastUser) && officeLineAlreadyGiven_(conversation || [])) {
+    out += '\n\nTHIS TURN ONLY: the caller asked for a person AGAIN, and you already gave the office number on this call. Do NOT read the office number or the hours again. Go straight to TAKE THE MESSAGE. Say: "' + officeSecondAskLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '"';
+  } else if (officeRequestIntent_(lastUser)) {
+    out += '\n\nTHIS TURN ONLY: the caller asked for a person. Offer the message first and say whether the office is open right now. Say: "' + officeHandoffLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '"';
+  } else if (OFFICE_OPEN_Q_RE_.test(norm)) {
+    out += '\n\nTHIS TURN ONLY: the caller asked whether the office is open. Answer that first, exactly: "' + officeStatusLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '" Then offer to take a message or help with anything else, in one short question.';
+  }
+  return out;
+}
+
 function buildTurnSystemHints(conversation, opts) {
   opts = opts || {};
   let suffix = '';
+  suffix += officeTurnHints_(conversation, opts);
   suffix += nonLeadHint_(conversation, opts);
   suffix += housingReferralHint_(conversation, opts);
   suffix += prospectIntakeHint_(conversation, opts);
@@ -1276,6 +1399,17 @@ function costRange_(ut, base, isSpanish) {
   return minN === maxN ? minS : minS + ' to ' + maxS;
 }
 
+// D-20261123-01: the figures a double-count would produce. Every movein_* total
+// already includes the deposit, so deposit + total is always wrong.
+function moveInNums_(ut) {
+  const n = (k) => (typeof ut[k] === 'number' ? ut[k] : null);
+  const dep = [n('deposit_min_num'), n('deposit_max_num'), n('deposit_num')].filter(x => x != null);
+  const tot = [n('movein_12_min_num'), n('movein_12_max_num'), n('movein_6_min_num'), n('movein_6_max_num')].filter(x => x != null);
+  const wrong = [];
+  for (const d of dep) for (const t of tot) if (wrong.indexOf(d + t) === -1) wrong.push(d + t);
+  return { deposits: dep, totals: tot, wrong: wrong };
+}
+
 // Deposit / move-in sentences for each AVAILABLE unit type, built from the
 // store's deposit_* and movein_* fields. Every sentence ends with the store's
 // quote_qualifier. Returns [] when the store carries no figures.
@@ -1299,15 +1433,19 @@ function moveInCostLines_(key, content) {
     const miEn = costRange_(ut, leadSix ? 'movein_6' : 'movein_12', false), miEs = costRange_(ut, leadSix ? 'movein_6' : 'movein_12', true);
     if (!depEn && !miEn) continue;
     const noAdmin = /no admin fee/i.test(ut.cost_line_en || '') || p.admin_fee_num === 0;
-    const en = [];
-    const es = [];
-    if (depEn) { en.push('the deposit is ' + depEn); es.push('el depósito es de ' + depEs); }
+    // D-20261123-01 (lead 200112): the store's movein_* figure is the TOTAL due
+    // at move-in and already includes the deposit (first month plus deposit).
+    // Say it that way, so the deposit is never added on top.
+    let enText, esText;
     if (miEn) {
-      en.push('the move-in cost is ' + miEn + (leadSix ? ' on a six-month lease' : ' on a twelve-month lease'));
-      es.push('el costo de mudanza es de ' + miEs + (leadSix ? ' con contrato de ' + sixMonthOption_(ut).months + ' meses' : ' con contrato de 12 meses'));
+      enText = 'the total due at move-in, including the deposit' + (depEn ? ' of ' + depEn : '') + ', is ' + miEn + (leadSix ? ' on a six-month lease' : ' on a twelve-month lease');
+      esText = 'el total a pagar al mudarse, incluido el depósito' + (depEs ? ' de ' + depEs : '') + ', es de ' + miEs + (leadSix ? ' con contrato de ' + sixMonthOption_(ut).months + ' meses' : ' con contrato de 12 meses');
+    } else {
+      enText = 'the deposit is ' + depEn;
+      esText = 'el depósito es de ' + depEs;
     }
-    let enText = en.join(', and ') + (noAdmin ? ', with no admin fee' : '') + ', ' + qEn + '.';
-    let esText = es.join(' y ') + (noAdmin ? ', sin cuota administrativa' : '') + ', ' + qEs + '.';
+    enText = enText + (noAdmin ? ', with no admin fee' : '') + ', ' + qEn + '.';
+    esText = esText + (noAdmin ? ', sin cuota administrativa' : '') + ', ' + qEs + '.';
     enText = enText.charAt(0).toUpperCase() + enText.slice(1);
     esText = esText.charAt(0).toUpperCase() + esText.slice(1);
     const six = sixMonthOption_(ut);
@@ -1316,15 +1454,15 @@ function moveInCostLines_(key, content) {
       // Second: the twelve-month move-in cost, only if asked.
       const m12En = costRange_(ut, 'movein_12', false), m12Es = costRange_(ut, 'movein_12', true);
       if (m12En) {
-        twelveEn = 'On a twelve-month lease the move-in cost is ' + m12En + ', ' + qEn + '.';
-        twelveEs = 'Con contrato de 12 meses el costo de mudanza es de ' + m12Es + ', ' + qEs + '.';
+        twelveEn = 'On a twelve-month lease the total due at move-in, including the deposit, is ' + m12En + ', ' + qEn + '.';
+        twelveEs = 'Con contrato de 12 meses el total a pagar al mudarse, incluido el depósito, es de ' + m12Es + ', ' + qEs + '.';
       }
     } else if (six && typeof ut.movein_6_min_num === 'number') {
       const m6En = costRange_(ut, 'movein_6', false), m6Es = costRange_(ut, 'movein_6', true);
-      sixEn = 'On a ' + six.word + '-month lease the move-in cost is ' + m6En + ', ' + qEn + '.';
-      sixEs = 'Con contrato de ' + six.months + ' meses el costo de mudanza es de ' + m6Es + ', ' + qEs + '.';
+      sixEn = 'On a ' + six.word + '-month lease the total due at move-in, including the deposit, is ' + m6En + ', ' + qEn + '.';
+      sixEs = 'Con contrato de ' + six.months + ' meses el total a pagar al mudarse, incluido el depósito, es de ' + m6Es + ', ' + qEs + '.';
     }
-    out.push({ type: t, label: label[t], en: enText, es: esText, sixEn: sixEn, sixEs: sixEs, twelveEn: twelveEn, twelveEs: twelveEs, leadSix: leadSix });
+    out.push({ type: t, label: label[t], en: enText, es: esText, sixEn: sixEn, sixEs: sixEs, twelveEn: twelveEn, twelveEs: twelveEs, leadSix: leadSix, nums: moveInNums_(ut) }); // D-20261123-01: nums feed the double-count guard only
   }
   return out;
 }
@@ -1361,6 +1499,7 @@ function buildMoveInCostRule_(key, content, usingFallback) {
     r += '- Give the twelve-month move-in cost first. Give the six-month move-in cost listed below when the caller asks about a six-month lease or about the move-in cost on each lease option. Quote it exactly as listed, with the qualifier, and never present it as a special or a reduction.\n';
   }
   r += '- Use ONLY these figures. Do not invent any other fee. Do not quote a deposit or move-in cost for a unit that is NOT available. The pet fee and pet rent are separate and are in PET POLICY.\n';
+  r += '- THE MOVE-IN TOTAL ALREADY INCLUDES THE DEPOSIT (D-20261123-01). Call it the "total due at move-in, including the deposit" (Spanish: "el total a pagar al mudarse, incluido el depósito"). NEVER add the deposit to the move-in total, never say "plus the deposit" or "in addition to the deposit", and never give any figure that is the deposit plus the move-in total. If the caller asks "how much total to move in" or "what do I pay in total", say the same total line again; it is already the full amount.\n';
   for (const l of lines) {
     r += '- ' + l.label + ' (English): "' + l.en + '"\n';
     r += '- ' + l.label + ' (Spanish): "' + l.es + '"\n';
@@ -1413,6 +1552,85 @@ function ensureQuoteQualifier_(text, opts) {
     : 'That is ' + (opts.quoteQualifierEn || QUOTE_QUALIFIER_EN) + '.';
   parts.splice(idx + 1, 0, add);
   return parts.join(' ');
+}
+
+// D-20261123-01 (lead 200112): Leo added the deposit to the move-in total and
+// said $3,500 / $3,295 instead of $2,500 / $2,295. The store's move-in figure is
+// already the total due at move-in INCLUDING the deposit. This guard replaces
+// any sentence that states deposit + total (digits, English or Spanish words),
+// or that adds the deposit on top of the move-in figure, with the store's own
+// total line. Figures that are also a real price at this property are never
+// treated as a double count.
+function moneyFigureIn_(text, n) {
+  if (p10HasFigure_(text, n)) return true;
+  n = Math.round(Number(n));
+  if (!(n >= 1000 && n <= 9999)) return false;
+  const th = Math.floor(n / 1000), rest = n % 1000, hu = Math.floor(rest / 100), tail = rest % 100;
+  const w = numberWordsEn_(th) + ' thousand' + (hu ? ' ' + numberWordsEn_(hu) + ' hundred' : '') + (tail ? ' (?:and )?' + numberWordsEn_(tail) : '');
+  const re = new RegExp('\\b' + w.replace(/[-,\s]+/g, '[-,\\s]*').replace('(?:and[-,\\s]*)?', '(?:and[-,\\s]*)?') + '\\b', 'i');
+  return re.test(String(text || '').replace(/-/g, ' '));
+}
+const MOVEIN_ADD_RE_ = /\b(plus|add|adding|added|on top of|in addition to|together with|combined|m[aá]s el dep[oó]sito|sumando|sumar|adem[aá]s del? dep[oó]sito)\b/i;
+const MOVEIN_WORD_RE_ = /\bmove[\s-]*in\b|\bmudanza\b|\bmudarse\b/i;
+const DEPOSIT_WORD_RE_ = /\bdeposit\w*|\bdep[oó]sito\b/i;
+function propertyLegitFigures_(p) {
+  const out = new Set();
+  const uts = (p && p.unit_types) || {};
+  for (const t of Object.keys(uts)) {
+    const ut = uts[t] || {};
+    for (const k of Object.keys(ut)) if (/_num$/.test(k) && typeof ut[k] === 'number') out.add(ut[k]);
+  }
+  return out;
+}
+function fixMoveInDoubleCount_(text, opts) {
+  opts = opts || {};
+  const t = String(text || '');
+  if (!t.trim()) return t;
+  let content = opts.content;
+  if (!content && typeof CONTENT_CACHE !== 'undefined') content = CONTENT_CACHE;
+  const key = opts.property && opts.property.key;
+  if (!content || !key || isUsingFallbackContent(content)) return t;
+  const p = content.properties && content.properties[key];
+  const lines = moveInCostLines_(key, content);
+  if (!p || !lines.length) return t;
+  const legit = propertyLegitFigures_(p);
+  const isEs = replyIsSpanish_(t, opts.isSpanish);
+  const sents = splitSentences_(t);
+  const unitOf = (sn) => {
+    const n = normalizeForMatch_(sn);
+    if (/\b(one|1|una|un) ?(bed|bedroom|br|recamara)/.test(n)) return '1br';
+    if (/\b(two|2|dos) ?(bed|bedroom|br|recamaras)/.test(n)) return '2br';
+    if (/\b(three|3|tres) ?(bed|bedroom|br|recamaras)/.test(n)) return '3br';
+    return '';
+  };
+  let hitLine = null;
+  const bad = sents.map((sn) => {
+    for (const l of lines) {
+      const wrong = (l.nums && l.nums.wrong || []).filter(w => !legit.has(w));
+      if (wrong.some(w => moneyFigureIn_(sn, w))) { hitLine = hitLine || l; return true; }
+    }
+    if (MOVEIN_ADD_RE_.test(sn) && MOVEIN_WORD_RE_.test(sn) && DEPOSIT_WORD_RE_.test(sn) && MONEY_FIGURE_RE_.test(sn)) {
+      const u = unitOf(sn);
+      const l = lines.filter(x => (u ? x.type === u : true));
+      const pick = l.find(x => (x.nums && x.nums.totals || []).some(n => moneyFigureIn_(sn, n))) || (l.length === 1 ? l[0] : null);
+      if (pick) { hitLine = hitLine || pick; return true; }
+    }
+    return false;
+  });
+  if (!hitLine) return t;
+  const fixed = isEs
+    ? hitLine.es + (hitLine.sixEs ? ' ' + hitLine.sixEs : '') + (hitLine.twelveEs ? ' ' + hitLine.twelveEs : '')
+    : hitLine.en + (hitLine.sixEn ? ' ' + hitLine.sixEn : '') + (hitLine.twelveEn ? ' ' + hitLine.twelveEn : '');
+  const out = [];
+  let placed = false;
+  sents.forEach((sn, i) => {
+    if (bad[i]) { if (!placed) { out.push(fixed); placed = true; } return; }
+    // a bare qualifier sentence right after a replaced figure is now redundant
+    if (placed && /^(that is|eso est[aá])\b[^.?!]*(subject to change|sujeto a cambio)[^.?!]*[.!]$/i.test(sn.trim())) return;
+    out.push(sn);
+  });
+  try { console.log('Move-in double-count guard: replaced ' + bad.filter(Boolean).length + ' sentence(s), unit ' + hitLine.type); } catch (e) {}
+  return out.join(' ');
 }
 
 // Pass 6 guard: no concession wording ever reaches the caller (Jenea, 2026-11-11).
@@ -1974,9 +2192,11 @@ function commitAssistantReply(session, rawText, opts) {
   spoken = stripGoodFaithWording_(spoken, opts);
   spoken = stripMarketRentWording_(spoken, opts);
   spoken = ensureTwoBrPriceAnswered_(spoken, session.conversation, opts);
+  spoken = fixMoveInDoubleCount_(spoken, opts);   // D-20261123-01 fix 1
   spoken = fixSpanishNumerals_(spoken, opts);
   spoken = ensureQuoteQualifier_(spoken, Object.assign({ quoteQualifierEn: storeQ.en, quoteQualifierEs: storeQ.es }, opts));
   spoken = ensureMaintenanceExtension_(spoken, session.conversation, opts);
+  spoken = ensureIntakeBeforeClose_(spoken, session, opts);   // D-20261123-01 fix 3
   session.conversation = session.conversation || [];
   session.conversation.push({ role: 'assistant', content: spoken });
   session.replyCommitted = true;
@@ -2624,8 +2844,11 @@ If the caller says they want to "reschedule," "change my tour," "move my appoint
 Then close with the CLOSING template above (English or Spanish per call language). Do not use the deprecated "Feel free to call or text this number anytime" wording.
 
 If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
-"Of course. You can reach our office at ${property.phone}. ${thisStaffHoursEn} Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?"
-If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
+"Of course. I can take a message for you right now and have the team call you back, or you can reach our office at ${property.phone}. [say whether the office is open right now, from the THIS TURN ONLY office status line when one is given; otherwise: ${thisStaffHoursEn}] Would you like to leave a message?"
+Offer the message FIRST, in that same reply, before the caller can hang up (D-20261123-01, F-20260911-02). If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
+SECOND ASK FOR A PERSON (D-20261123-01): if you ALREADY gave the office number on this call and the caller asks for a person again ("can I please speak to someone?"), do NOT read the number or the hours again. Say whether the office is open right now, then go straight to TAKE THE MESSAGE below, starting with their first name (or what they want you to pass on, if you already have the name). Never repeat the same number and hours twice in one call.
+IS THE OFFICE OPEN? If the caller asks whether the office is open or closed right now, answer with the open-right-now status line from the THIS TURN ONLY hint first, not the weekly hours alone.
+CURRENT RESIDENTS (D-20261123-01): if the caller says they live here now ("I live there", "I'm a resident", a unit transfer), they are NOT a leasing prospect. Do not pitch units, prices or tours. Their message is for Viola, not "the team": take a message for Viola.
 TAKE THE MESSAGE — CALLBACK CAPTURE (added 2026-09-21, F-20260911-02): if the caller says yes to leaving a message, OR says they already called the office, the office did not answer, the office is closed, or they want to "leave a message," do NOT read the office number again. Take the message right away, one question per turn:
 1. "Can I get your first name?"
 2. "And what would you like me to tell the team?" (If they already said why they are calling, skip this and repeat the reason back in one short phrase instead.)
@@ -2634,7 +2857,7 @@ Then confirm. If the caller gave a different callback number, read that number b
 BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence. If the caller gave a different callback number, read that number back once, digit by digit, in the confirmation: "Thank you, [Name]. I have your message, and I'll call you back at [their number, digit by digit]." If they said the number they are calling from is best, do not read a number back; say: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
-Spanish: "Claro. Puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. ${thisStaffHoursEs} O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
+Spanish: "Claro. Puedo tomarle un mensaje ahora mismo para que el equipo le devuelva la llamada, o puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. [diga si la oficina está abierta en este momento, con la línea de estado de la oficina de la indicación THIS TURN ONLY cuando la haya; si no: ${thisStaffHoursEs}] ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
 
 ============================================================
 LANGUAGE RULES
@@ -3386,7 +3609,28 @@ function looksUnintelligible_(text) {
   return tokens.every(function (w) { return filler.test(w) || /^\d+$/.test(w); });
 }
 
-function loopGuardLines_(isSpanish) {
+// D-20261123-01 fix 4 (lead 200116): residents and other non-lead callers leave
+// their message for Viola, not "the team".
+const LOOP_GUARD_VIOLA_EN_ = {
+  B: "Let me take a message so Viola can call you back. What's your first name?",
+  soft: 'Just so you know, I can take a message for Viola or connect you with the office.',
+  askMessage: 'Thanks. And what would you like me to tell Viola?',
+  Bnamed: 'Let me take a message so Viola can call you back. What would you like me to tell her?',
+  savedClose: "Thank you{NAME}. I have your message, and I'll pass it to Viola. She'll call you back at the number you're calling from during office hours. Goodbye."
+};
+const LOOP_GUARD_VIOLA_ES_ = {
+  B: 'Permítame tomar un mensaje para que Viola le devuelva la llamada. ¿Cuál es su nombre?',
+  soft: 'Solo para que lo sepa, puedo tomar un mensaje para Viola o comunicarle con la oficina.',
+  askMessage: 'Gracias. ¿Qué desea que le diga a Viola?',
+  Bnamed: 'Permítame tomar un mensaje para que Viola le devuelva la llamada. ¿Qué desea que le diga?',
+  savedClose: 'Gracias{NAME}. Tengo su mensaje y se lo paso a Viola, y ella le devolverá la llamada al número desde el que llama en horario de oficina. Adiós.'
+};
+function loopGuardLines_(isSpanish, session) {
+  const base = loopGuardLinesBase_(isSpanish);
+  if (session && messageForViola_(session)) return Object.assign({}, base, isSpanish ? LOOP_GUARD_VIOLA_ES_ : LOOP_GUARD_VIOLA_EN_);
+  return base;
+}
+function loopGuardLinesBase_(isSpanish) {
   if (isSpanish) {
     return {
       A: 'Puedo ayudarle con precios, disponibilidad, programar una visita o tomar un mensaje para nuestro equipo. ¿Qué le gustaría?',
@@ -3423,16 +3667,89 @@ function loopGuardLines_(isSpanish) {
   };
 }
 
-function officeHandoffLine_(session, isSpanish) {
+// ============================================================
+// D-20261123-01 fix 2 (F-20260911-02 repeat; leads 200106, 200111, 200114,
+// 200117): is the office open RIGHT NOW? Weekly schedule per property, in
+// America/Phoenix time (no daylight saving, always UTC-7). Same hours as
+// OFFICE_HOURS above. Holidays are not known here, so a holiday reads as a
+// normal day; the message offer is always made either way.
+// ============================================================
+const PHX_OFFSET_MS_ = -7 * 3600 * 1000;
+const HOUR_WORDS_EN_ = { 9: 'nine A M', 10: 'ten A M', 15: 'three P M', 17: 'five P M', 18: 'six P M' };
+const HOUR_WORDS_ES_ = { 9: 'las nueve de la mañana', 10: 'las diez de la mañana', 15: 'las tres de la tarde', 17: 'las cinco de la tarde', 18: 'las seis de la tarde' };
+function officeStatusNow_(property, nowMs) {
+  const key = hoursPropertyKey_(property) || 'nmf';
+  const sch = (OFFICE_HOURS[key] || OFFICE_HOURS.nmf).schedule;
+  const d = new Date((nowMs == null ? Date.now() : Number(nowMs)) + PHX_OFFSET_MS_);
+  const day = d.getUTCDay();               // 0 Sun .. 6 Sat, Phoenix local
+  const h = d.getUTCHours() + d.getUTCMinutes() / 60;
+  const openRange = (day >= 1 && day <= 5) ? sch.weekday : (day === 6 ? sch.saturday : sch.sunday);
+  const inR = (r) => !!r && h >= r[0] && h < r[1];
+  if (inR(openRange)) {
+    return { state: 'open', en: 'Right now the office is open, until ' + HOUR_WORDS_EN_[openRange[1]] + '.', es: 'En este momento la oficina está abierta, hasta ' + HOUR_WORDS_ES_[openRange[1]] + '.' };
+  }
+  if (day >= 1 && day <= 5 && inR(sch.weekdayAppt) && sch.apptNowEn) {
+    return { state: 'appointment', en: sch.apptNowEn, es: sch.apptNowEs };
+  }
+  // Closed: when does it open next?
+  let nextEn = '', nextEs = '';
+  for (let add = 0; add <= 7 && !nextEn; add++) {
+    const dd = (day + add) % 7;
+    const r = (dd >= 1 && dd <= 5) ? sch.weekday : (dd === 6 ? sch.saturday : sch.sunday);
+    if (!r) continue;
+    if (add === 0 && h >= r[0]) continue;
+    const names = sch.daysEn, namesEs = sch.daysEs;
+    const whenEn = add === 0 ? 'today' : (add === 1 ? 'tomorrow' : names[dd]);
+    const whenEs = add === 0 ? 'hoy' : (add === 1 ? 'mañana' : namesEs[dd]);
+    nextEn = ' It opens ' + whenEn + ' at ' + HOUR_WORDS_EN_[r[0]] + '.';
+    nextEs = ' Abre ' + whenEs + ' a ' + HOUR_WORDS_ES_[r[0]] + '.';
+  }
+  const satNote = (day === 6 && sch.saturdayAppt) ? { en: sch.satNoteEn, es: sch.satNoteEs } : { en: '', es: '' };
+  return { state: 'closed', en: 'Right now the office is closed.' + satNote.en + nextEn, es: 'En este momento la oficina está cerrada.' + satNote.es + nextEs };
+}
+function officeStatusLine_(session, isSpanish, nowMs) {
+  const st = officeStatusNow_((session && session.property) || null, nowMs != null ? nowMs : loopGuardNow_(session));
+  return isSpanish ? st.es : st.en;
+}
+// Who the message is for: Viola for residents and other non-lead callers, the team otherwise.
+function messageForViola_(session) {
+  try { return !!(session && classifyNonLeadCall_(session.conversation || [])); } catch (e) { return false; }
+}
+// Has Leo (the guard OR the model) already read the office line on this call?
+function officeLineAlreadyGiven_(sessionOrConversation) {
+  const conv = Array.isArray(sessionOrConversation) ? sessionOrConversation : ((sessionOrConversation && sessionOrConversation.conversation) || []);
+  if (!Array.isArray(sessionOrConversation) && sessionOrConversation && sessionOrConversation.loopGuard && sessionOrConversation.loopGuard.officeHandoffGiven) return true;
+  return conv.some(m => m && m.role === 'assistant' && /(2928|two nine two eight)/i.test(String(m.content || '')) && !/(extension|extensi[oó]n) (three|3|tres)\b/i.test(String(m.content || '')));
+}
+
+function officeHandoffLine_(session, isSpanish, nowMs) {
   const property = (session && session.property) || {};
   const phone = property.phone || '602-997-2928 extension 1';
+  const viola = messageForViola_(session);
+  const status = officeStatusLine_(session, isSpanish, nowMs);
+  // D-20261123-01 fix 2: offer the message FIRST, then the office line, the
+  // official hours (said once per call, here), whether it is open RIGHT NOW,
+  // then ask. A second ask never repeats this; see officeSecondAskLine_.
   if (isSpanish) {
     const hours = formatHoursStatement_(property.hours_es || property.hours || '', 'es');
     const spokenPhone = String(phone).replace(/extension/i, 'extensión');
-    return 'Claro. Puede comunicarse con nuestra oficina al ' + spokenPhone + '. ' + hours + ' O puedo tomar un mensaje para que el equipo le devuelva la llamada a este número. ¿Desea dejar un mensaje?';
+    return 'Claro. Puedo tomarle un mensaje ahora mismo, o puede comunicarse con nuestra oficina al ' + spokenPhone + '. ' + hours + ' ' + status + ' Si deja un mensaje, ' + (viola ? 'Viola le devolverá' : 'el equipo le devolverá') + ' la llamada a este número. ¿Desea dejar un mensaje?';
   }
   const hours = formatHoursStatement_(property.hours || '', 'en');
-  return 'Of course. You can reach our office at ' + phone + '. ' + hours + ' Or I can take a quick message and have the team call you back at this number. Would you like to leave a message?';
+  return 'Of course. I can take a message right now and have ' + (viola ? 'Viola' : 'the team') + ' call you back at this number, or you can reach our office at ' + phone + '. ' + hours + ' ' + status + ' Would you like to leave a message?';
+}
+
+// D-20261123-01 fix 2 (lead 200114): a second ask for a person, after the office
+// line was already given, goes STRAIGHT to the message. Never the number and the
+// hours again. Says whether the office is open right now.
+function officeSecondAskLine_(session, isSpanish, nowMs) {
+  const viola = messageForViola_(session);
+  const status = officeStatusLine_(session, isSpanish, nowMs);
+  const named = !!loopGuardCapturedName_(session);
+  if (isSpanish) {
+    return status + ' Le tomo el mensaje ahora mismo para que ' + (viola ? 'Viola' : 'el equipo') + ' le devuelva la llamada. ' + (named ? '¿Qué desea que le diga' + (viola ? ' a Viola' : ' al equipo') + '?' : '¿Me puede dar su nombre?');
+  }
+  return status + " I'll take your message right now so " + (viola ? 'Viola' : 'the team') + ' can call you back. ' + (named ? 'What would you like me to tell ' + (viola ? 'Viola' : 'them') + '?' : 'Can I get your first name?');
 }
 
 // D-20261120 fix 1 (leads 200091, 200096, 200097, 200098, 200101, 200102):
@@ -3457,7 +3774,7 @@ function loopGuardHasMessage_(session) {
 }
 
 function stallCloseLine_(session) {
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   const name = loopGuardCapturedName_(session);
   if (name || loopGuardHasMessage_(session)) {
     const nameBit = name ? ', ' + String(name).split(/\s+/)[0] : '';
@@ -3467,7 +3784,7 @@ function stallCloseLine_(session) {
 }
 
 function stepBLine_(session) {
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   return loopGuardCapturedName_(session) ? lines.Bnamed : lines.B;
 }
 
@@ -3475,7 +3792,7 @@ function stepBLine_(session) {
 // is captured. Returns { reply, close } where close means save and end politely.
 function nextMessageFlowLine_(session) {
   const g = ensureLoopGuardState_(session);
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   const lastLeo = normalizeLoopText_(lastTurnByRole_(session, 'assistant') || '');
   const asked = function (line) { return normalizeLoopText_(line) === lastLeo; };
   if (!loopGuardCapturedName_(session)) {
@@ -3513,8 +3830,11 @@ function officeRequestIntent_(text, opts) {
   const want = /\b(want|need|like|looking for|asking for|requesting|give me|get me)( to)?( speak| talk)?( to| with)?( a| an| the| your| some)? ?(representative|manager|management|supervisor|someone in charge|somebody in charge|person in charge|real person|live person)\b/;
   const isThere = /\bis there (a |an )?(manager|supervisor|representative|someone in charge|somebody in charge|real person|live person)\b/;
   const es = /\b(hablar|comunicarme|comunicar|hable|pasar|pasarme|quiero|necesito|puedo)( hablar)?( con)? (un |una |el |la )?(representante|gerente|encargad[oa]|persona real|una persona|alguien a cargo)\b/;
-  if (ask.test(norm) || want.test(norm) || isThere.test(norm) || es.test(norm)) {
-    return { intent: 'office', spanish: es.test(norm) };
+  // D-20261123-01 fix 2 (lead 200114): "Can I please speak to someone?" never reached the handoff.
+  const someone = /\b(speak|talk|talking|speaking)( to| with)( to| with)? (someone|somebody|anyone|anybody|a person|a human|a real person|a live person|an actual person|the office|staff|the staff|the leasing office|leasing)\b/;
+  const esSomeone = /\b(hablar|comunicarme|hable) con (alguien|una persona|la oficina|el personal)\b/;
+  if (ask.test(norm) || want.test(norm) || isThere.test(norm) || es.test(norm) || someone.test(norm) || esSomeone.test(norm)) {
+    return { intent: 'office', spanish: es.test(norm) || esSomeone.test(norm) };
   }
   return null;
 }
@@ -3595,10 +3915,10 @@ function loopGuardKeywordIntent_(text, opts) {
   return null;
 }
 
-function loopGuardKeywordReply_(session, intent, isSpanish) {
-  const lines = loopGuardLines_(isSpanish);
+function loopGuardKeywordReply_(session, intent, isSpanish, nowMs) {
+  const lines = loopGuardLines_(isSpanish, session);
   if (intent === 'message') return lines.message;
-  if (intent === 'office') return officeHandoffLine_(session, isSpanish);
+  if (intent === 'office') return officeHandoffLine_(session, isSpanish, loopGuardNow_(session, nowMs));
   if (intent === 'price') return lines.price;
   if (intent === 'tour') return lines.tour;
   if (intent === 'goodbye') return lines.bye;
@@ -3815,7 +4135,7 @@ function maybePrependSoftCap_(session, reply, nowMs) {
   if (inActiveCallbackReadback_(session)) return reply;
   g.softCapSpoken = true;
   logLoopGuardStep_(session, 'D-soft');
-  const line = loopGuardLines_(!!(session && session.isSpanish)).soft;
+  const line = loopGuardLines_(!!(session && session.isSpanish), session).soft;
   const body = String(reply || '').trim();
   if (!body) return line;
   if (normalizeLoopText_(body) === normalizeLoopText_(line)) return body;
@@ -3824,7 +4144,7 @@ function maybePrependSoftCap_(session, reply, nowMs) {
 
 function nextLoopGuardLadderReply_(session, prefer, nowMs) {
   const g = ensureLoopGuardState_(session, nowMs);
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   let step = prefer || 'B';
   if (g.lastStep === 'B' || g.lastStep === 'C' || g.messageFlow && prefer === 'B' && g.noProgressTurns >= 5) {
     if (prefer === 'C' || g.noProgressTurns >= 5 || (g.lastStep === 'B' && g.silenceTurns >= 2) || g.lastStep === 'B' && prefer === 'B') {
@@ -3855,7 +4175,7 @@ function applyLeoRepeatGuard_(session, reply, nowMs) {
     return { reply: reply, replaced: false, hangUp: false, step: null };
   }
   g.leoRepeat = (g.leoRepeat || 0) + 1;
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   // A slow but engaged caller (progress this turn, counters at 0) must not be
   // cut off before the hard cap just because the model repeated itself.
   const engaged = g.noProgressTurns === 0;
@@ -3903,13 +4223,14 @@ function runLoopGuardTurn_(session, nowMs) {
   else g.noProgressTurns += 1;
 
   const isSpanish = !!(session && session.isSpanish);
-  const lines = loopGuardLines_(isSpanish);
+  const lines = loopGuardLines_(isSpanish, session);
 
   // Keyword shortcut, only the first time that keyword starts a flow.
   // A repeated "Message" with no new slot is no-progress, not a fresh start.
   // D-20261120 fix 2 (lead 200101): after the office handoff asked "Would you
   // like to leave a message?", a plain yes ("Ya", "Yes") starts the message.
-  if (!classified.keyword && !g.messageFlow && g.officeHandoffGiven &&
+  const handoffGiven = officeLineAlreadyGiven_(session);   // D-20261123-01: the guard's OR the model's office line
+  if (!classified.keyword && !g.messageFlow && handoffGiven &&
       /^(yes|yeah|yep|yup|yea|ya|yah|sure|ok|okay|please|si|claro|por favor)\b/.test(classified.norm || '') && !/\b(no|not|nope|dont)\b/.test(classified.norm || '') &&
       /(leave a message\?|desea dejar un mensaje\?)\s*$/i.test(lastTurnByRole_(session, 'assistant') || '')) {
     classified.keyword = { intent: 'message', spanish: false };
@@ -3918,20 +4239,23 @@ function runLoopGuardTurn_(session, nowMs) {
   }
   // A repeated ask for a person after the handoff is not a stall: the caller
   // still wants a person, so it goes to the message (below), not the menu.
-  const repeatOfficeAsk = !!(classified.keyword && classified.keyword.intent === 'office' && g.officeHandoffGiven && !g.messageFlow && !classified.progress);
+  const repeatOfficeAsk = !!(classified.keyword && classified.keyword.intent === 'office' && handoffGiven && !g.messageFlow && !classified.progress);
   if (repeatOfficeAsk) { classified.progress = true; noteLoopGuardProgress_(session, 'office_repeat'); }
   if (classified.keyword && classified.progress) {
     if (classified.keyword.spanish && session && !session.isSpanish) session.isSpanish = true;
     const replyLang = !!(session && session.isSpanish);
     // A second ask for a person after the office line was already given: the
     // route failed for them, so take the message (TAKE THE MESSAGE rule).
-    if (classified.keyword.intent === 'office' && g.officeHandoffGiven) classified.keyword = { intent: 'message', spanish: classified.keyword.spanish };
-    let raw = loopGuardKeywordReply_(session, classified.keyword.intent, replyLang);
+    const secondOfficeAsk = classified.keyword.intent === 'office' && handoffGiven;
+    if (secondOfficeAsk) classified.keyword = { intent: 'message', spanish: classified.keyword.spanish };
+    let raw = loopGuardKeywordReply_(session, classified.keyword.intent, replyLang, nowMs);
     if (classified.keyword.intent === 'office') g.officeHandoffGiven = true;
     if (classified.keyword.intent === 'message') {
       g.messageFlow = true;
       // Never re-ask a captured name.
-      if (loopGuardCapturedName_(session)) { raw = loopGuardLines_(replyLang).askMessage; g.messageAsked = true; }
+      if (loopGuardCapturedName_(session)) { raw = loopGuardLines_(replyLang, session).askMessage; g.messageAsked = true; }
+      // D-20261123-01 fix 2: second ask for a person goes straight to the message, with open-now status.
+      if (secondOfficeAsk) { raw = officeSecondAskLine_(session, replyLang, nowMs); if (loopGuardCapturedName_(session)) g.messageAsked = true; }
     }
     if (classified.keyword.intent === 'goodbye') {
       const spoken = commitLoopGuardReply_(session, maybePrependSoftCap_(session, raw, nowMs), {});
@@ -3996,7 +4320,7 @@ function maybeLoopGuardHardCap_(session, nowMs) {
   if (g.hungUp) return { spoken: '', intercepted: 'loop_guard_ended', hungUp: true, leadSnapshot: g.leadSnapshot };
   const caps = loopGuardCaps_(session);
   if (loopGuardElapsedMs_(session, nowMs) < caps.LOOP_HARD_CAP_MS) return null;
-  const lines = loopGuardLines_(!!(session && session.isSpanish));
+  const lines = loopGuardLines_(!!(session && session.isSpanish), session);
   return finishLoopGuardHangup_(session, 'D', stallCloseLine_(session), nowMs);
 }
 
@@ -4575,10 +4899,17 @@ async function postLeadToDashboard(session) {
   let leadStatus = 'new';
   const nonLead = isMaintenanceCall(session.conversation, {}) ? null : classifyNonLeadCall_(session.conversation);
   if (nonLead) {
-    leadStatus = NONLEAD_LEAD_STATUS;
+    // D-20261123-01 fix 4: residents get RESIDENT_LEAD_STATUS (default 'resident'), other non-leads NONLEAD_LEAD_STATUS.
+    leadStatus = nonLead.kind === 'resident' ? RESIDENT_LEAD_STATUS : NONLEAD_LEAD_STATUS;
     summary = 'NON-LEAD (' + nonLead.label + '). For ' + NONLEAD_ROUTE_TO + '. Not a sales lead.\n' + summary;
     const rest = String(ai_action_final || '').replace(/^\s*NON-LEAD[^:]*:\s*/i, '');
     ai_action_final = ('NON-LEAD FOR ' + NONLEAD_ROUTE_TO.toUpperCase() + ' (' + nonLead.label + '): ' + (rest || 'Take the message and call back.')).substring(0, 240);
+  }
+  // D-20261123-01 fix 4: obvious spam is saved as spam, not as a sales lead.
+  if (!nonLead && !isMaintenanceCall(session.conversation, {}) && spamCall_(session.conversation)) {
+    leadStatus = SPAM_LEAD_STATUS;
+    summary = 'SPAM (robocall, sales pitch or scam). Not a sales lead. No callback needed.\n' + summary;
+    ai_action_final = 'SPAM: no follow-up needed. Not a sales lead.';
   }
   // D-20261120-13: flag housing program or caseworker referrals for staff. Status stays 'new' (a lead).
   if (!nonLead && !isMaintenanceCall(session.conversation, {}) && housingReferralCall_(session.conversation)) {
