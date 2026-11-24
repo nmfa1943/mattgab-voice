@@ -229,9 +229,9 @@ const PROPERTIES = {
     tour_link: 'https://mattgabmanagement.com/tour.php?property=nmf', // D-20261120-05: one booking page (old outside scheduler retired)
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). 880 square feet, 2 bed, 1 and a half baths. Let me have the office confirm current availability for you.
-1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, all utilities included. Let me have the office confirm current availability for you.
-3 bedroom: eighteen hundred a month, all utilities included (electric, water, sewer, and trash). Let me have the office confirm current availability for you.`,
+2 bedroom: ${TWO_BR_STATIC_LINE_}, with electric, water, sewer and trash included. 880 square feet, 2 bed, 1 and a half baths. Let me have the office confirm current availability for you.
+1 bedroom: one thousand three hundred dollars a month on a twelve-month lease, with electric, water, sewer and trash included. Let me have the office confirm current availability for you.
+3 bedroom: eighteen hundred a month, with electric, water, sewer and trash included. Let me have the office confirm current availability for you.`,
     greeting_en: "Thank you for calling North Mountain Foothills Apartments. This is the AI assistant for Matt Gab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a North Mountain Foothills Apartments. Soy el asistente de IA de Matt Gab Management. ¿Cómo puedo ayudarle hoy?"
   },
@@ -259,9 +259,9 @@ const PROPERTIES = {
     // not by confirming that a text arrived.
     apply_link: 'https://apexm.twa.rentmanager.com/ApplyNow?locations=2',
     units: `
-2 bedroom: ${TWO_BR_STATIC_LINE_}, all utilities included (electric, water, sewer, and trash). Let me have the office confirm current availability for you.
-1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, all utilities included — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.
-3 bedroom: one thousand, eight hundred dollars a month, all utilities included (electric, water, sewer, and trash) — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.`,
+2 bedroom: ${TWO_BR_STATIC_LINE_}, with electric, water, sewer and trash included. Let me have the office confirm current availability for you.
+1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease, with electric, water, sewer and trash included — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.
+3 bedroom: one thousand, eight hundred dollars a month, with electric, water, sewer and trash included — NOT available right now, coming available soon. I can connect you with our office or add you to our waiting list.`,
     greeting_en: "Thank you for calling Windsong Apartments. This is the AI assistant for Matt Gab Management. Para español, diga hola. How can I help you today?",
     greeting_es: "Gracias por llamar a Windsong Apartments. Soy el asistente de IA de Matt Gab Management. ¿Cómo puedo ayudarle hoy?"
   }
@@ -294,7 +294,7 @@ const CONTENT_API_KEY = process.env.CONTENT_API_KEY || '';
 
 const DEFAULT_CONTENT = {
   meta: { version: 0, effective_date: 'baseline', updated_by: 'DEFAULT_CONTENT' },
-  utilities_line: 'ALL UTILITIES INCLUDED IN RENT.',
+  utilities_line: 'ELECTRIC, WATER, SEWER AND TRASH INCLUDED IN RENT.',
   obsolete_figures: ['ten fifty', 'thirteen ninety nine', 'fourteen fifty', 'fifteen hundred fifty'],
   obsolete_figures_pronunciation_extra: ['twelve hundred ninety five'],
   properties: {
@@ -1518,7 +1518,7 @@ function moveInCostLines_(key, content) {
 }
 
 const MOVE_IN_DEFLECT_EN = 'Your move-in cost depends on your application and lease terms, so our leasing team will give you the exact numbers at the tour. The monthly price already includes all your utilities. Want me to text you the tour link?';
-const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los términos del contrato, así que nuestro equipo le dará los números exactos en la visita. El precio mensual ya incluye todos los servicios. ¿Quiere que le envíe el enlace para reservar un recorrido por texto?';
+const MOVE_IN_DEFLECT_ES = 'El costo de mudanza depende de su solicitud y de los términos del contrato, así que nuestro equipo le dará los números exactos en la visita. El precio mensual ya incluye luz, agua, drenaje y basura. ¿Quiere que le envíe el enlace para reservar un recorrido por texto?';
 
 // Pass 6: what the agent says when a caller asks about a special, discount or
 // move-in offer. Same sentence the CONDITIONS rule already uses; it never hints
@@ -1531,7 +1531,7 @@ const NO_SPECIAL_REPLY_ES = 'El precio depende de la aprobación de su solicitud
 // figures in the store) it keeps the old "leasing team will give you the
 // numbers" deflection rather than guessing.
 function buildMoveInCostRule_(key, content, usingFallback) {
-  const head = '- "All utilities included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.\n';
+  const head = '- "Electric, water, sewer and trash included" is the dominant value message on every pricing conversation — lead with it. Most competitors in the area do not include utilities; it is our biggest differentiator.\n';
   const lines = usingFallback ? [] : moveInCostLines_(key, content);
   if (!lines.length) {
     return head +
@@ -1871,9 +1871,9 @@ function twoBrPriceParts_(content, propKey, isSpanish) {
   if (isSpanish) {
     const es = twoTermPriceTextEs_(ut);
     if (!es) return null;
-    price = 'El departamento de dos recámaras cuesta ' + es + ', con todos los servicios incluidos.';
+    price = 'El departamento de dos recámaras cuesta ' + es + ', con luz, agua, drenaje y basura incluidos.';
   } else {
-    price = 'The two bedroom is ' + twoTermPriceText_(ut, '') + ', all utilities included.';
+    price = 'The two bedroom is ' + twoTermPriceText_(ut, '') + ', with electric, water, sewer and trash included.';
   }
   const dep = moveInCostLines_(propKey, content).filter(l => l.type === '2br')[0] || null;
   return {
@@ -2426,15 +2426,15 @@ function renderUnitsBlock(key, content) {
     const kind = unitPromptKind_(p.unit_types[t], t, avail, usingFallback);
     const priced = label[t] + ': ' + priceWithTermText_(p.unit_types[t], price[t]);
     if (kind === 'available') {
-      return priced + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' AVAILABLE NOW.';
+      return priced + ', with electric, water, sewer and trash included.' + sq(t) + ' AVAILABLE NOW.';
     }
     if (kind === 'coming_soon') {
-      return priced + ', all utilities included. NOT available right now, coming available soon.';
+      return priced + ', with electric, water, sewer and trash included. NOT available right now, coming available soon.';
     }
     if (kind === 'confirm_office') {
-      return priced + ', all utilities included (electric, water, sewer, and trash).' + sq(t) + ' ' + OFFICE_CONFIRM_EN;
+      return priced + ', with electric, water, sewer and trash included.' + sq(t) + ' ' + OFFICE_CONFIRM_EN;
     }
-    return priced + ', all utilities included. NOT available right now, coming available soon.';
+    return priced + ', with electric, water, sewer and trash included. NOT available right now, coming available soon.';
   }).join('\n');
 }
 
@@ -2565,7 +2565,7 @@ function buildSystemPrompt(property, content) {
     const OFFICE_CONFIRM_ES = 'Permítame pedirle a la oficina que le confirme la disponibilidad actual.';
     const unitLines = ['1br', '2br', '3br'].filter(t => PUT[t]).map(t => {
       const kind = unitPromptKind_(PUT[t], t, AVAIL, usingFallbackContent);
-      const priced = '"' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included."';
+      const priced = '"' + priceWithTermText_(PUT[t], UNIT_PRICE[t]) + ', with electric, water, sewer and trash included."';
       if (kind === 'available') {
         return '- ' + UNIT_LABEL[t] + ': ' + priced + ' AVAILABLE NOW - offer it for a tour.';
       }
@@ -2589,11 +2589,11 @@ function buildSystemPrompt(property, content) {
     // matter what the store said. Both are now built from the same AVAIL list.
     const lowPriceRule = usingFallbackContent
       ? (isComingSoonUnit_(PUT['1br'])
-          ? 'On THIS line the one-bedroom is not available right now. ALWAYS say the price first ("' + UNIT_PRICE['1br'] + ' a month, all utilities included"), then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list.'
-          : 'Give the current one-bedroom price ("' + UNIT_PRICE['1br'] + ' a month, all utilities included") and say: "Let me have the office confirm current availability for you."')
+          ? 'On THIS line the one-bedroom is not available right now. ALWAYS say the price first ("' + UNIT_PRICE['1br'] + ' a month, with electric, water, sewer and trash included"), then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list.'
+          : 'Give the current one-bedroom price ("' + UNIT_PRICE['1br'] + ' a month, with electric, water, sewer and trash included") and say: "Let me have the office confirm current availability for you."')
       : (AVAIL.indexOf('1br') !== -1
-      ? 'On THIS line the one-bedroom is AVAILABLE NOW at "' + UNIT_PRICE['1br'] + '" a month, all utilities included, so confirm it and pivot to the tour.'
-      : 'One-bedrooms are NOT available on THIS line right now. Say that, then give the all-in price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour.');
+      ? 'On THIS line the one-bedroom is AVAILABLE NOW at "' + UNIT_PRICE['1br'] + '" a month, with electric, water, sewer and trash included, so confirm it and pivot to the tour.'
+      : 'One-bedrooms are NOT available on THIS line right now. Say that, then give the monthly price of a unit listed AVAILABLE NOW for THIS property above and pivot to the tour.');
     const WORD = { '1br': 'one', '2br': 'two', '3br': 'three' };
     const fallbackAvailabilityRule = usingFallbackContent
       ? '\nFALLBACK MODE — THE LIVE PRICE LIST COULD NOT BE LOADED FOR THIS CALL:\nDo not state unit availability as a fact and never claim a unit is currently available. If the caller asks whether a unit is available, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." You may mention the last known prices below as figures the office will confirm, and you may offer to have the office call them back. Exception: Windsong one-bedrooms and three-bedrooms are quotable but not available; say the price first, then the coming-soon line, then offer to connect the caller with the office or add them to the waiting list.\n'
@@ -2604,9 +2604,9 @@ function buildSystemPrompt(property, content) {
     const ES_UNIT = { '1br': 'una recámara', '2br': 'dos recámaras', '3br': 'tres recámaras' };
     const sixMonthRule = !promoUnits.length ? ''
       : '\n- TWO LEASE OPTIONS, ALWAYS TOGETHER: for the unit(s) listed above with two lease lengths, every time you give the price, state BOTH lease options in the same sentence, in the order listed above, each with its lease length: ' +
-        promoUnits.map(t => UNIT_LABEL[t] + ' "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', all utilities included"').join('; ') +
+        promoUnits.map(t => UNIT_LABEL[t] + ' "' + twoTermPriceText_(PUT[t], UNIT_PRICE[t]) + ', with electric, water, sewer and trash included"').join('; ') +
         '. These are our two ongoing lease options, said plainly with no extra framing. Do not recommend one over the other and never say either can change. If the caller asks whether the six-month price is a special or a promotion, say it is simply one of our two lease options, then go back to the tour. In Spanish always use usted: ' +
-        promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El departamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con todos los servicios incluidos."' : ''; }).filter(Boolean).join(' ') +
+        promoUnits.map(t => { const es = twoTermPriceTextEs_(PUT[t]); return es ? '"El departamento de ' + ES_UNIT[t] + ' cuesta ' + es + ', con luz, agua, drenaje y basura incluidos."' : ''; }).filter(Boolean).join(' ') +
         ' In Spanish say the lease lengths as "12 meses" and "6 meses" (or "doce meses" and "seis meses"). Never use English number words inside Spanish, such as "twelve meses", "six meses", "contrato de twelve" or "one hundred and four"; say a unit number as digits, for example "unidad 104". Then go back to the tour.';
     // Pass 8: the phone agent never speaks a market rent or a "regular" price.
     const marketRentRule = '\n- NEVER state or hint at a market rent, a higher or comparison price, a was-now price or a crossed-out price, even if the caller names a figure or asks. The only monthly figures you ever give are the ones listed above. If the caller quotes a different figure, give the listed price instead. If the caller asks what the market, regular or comparison price is (alone or together with the price), do NOT use the approval sentence and do NOT refuse: say plainly that the listed prices are our current prices ("Those are our current prices." / "Esos son nuestros precios actuales.") and give the unit\'s listed lease option(s) exactly as listed, with no other figure.';
@@ -2615,14 +2615,14 @@ function buildSystemPrompt(property, content) {
     const NUM2 = PUT['2br'] || {};
     const sixOpt2 = promoUnits.indexOf('2br') !== -1 ? sixMonthOption_(NUM2) : null;
     const spoken12 = NUM2.std12_utils_spoken || NUM2.utils_spoken || 'one thousand, five hundred dollars';
-    const fullFigures = 'Use the same full-words form for current prices only: thirteen hundred is "one thousand three hundred dollars", fifteen hundred is "one thousand five hundred dollars", ' + (sixOpt2 ? 'twelve ninety five is "' + sixOpt2.spoken + '", ' : '') + 'eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. If the caller repeats a retired price, do not confirm it: say "That price is no longer offered. The current price is [listed price for the unit and lease], all utilities included." / "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con todos los servicios incluidos." After correcting or confirming, continue naturally with the tour offer.';
+    const fullFigures = 'Use the same full-words form for current prices only: thirteen hundred is "one thousand three hundred dollars", fifteen hundred is "one thousand five hundred dollars", ' + (sixOpt2 ? 'twelve ninety five is "' + sixOpt2.spoken + '", ' : '') + 'eighteen hundred is "one thousand eight hundred dollars". Never agree with a monthly rent figure under five hundred dollars; no Mattgab unit rents for less than that. If the caller repeats a retired price, do not confirm it: say "That price is no longer offered. The current price is [listed price for the unit and lease], with electric, water, sewer and trash included." / "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con luz, agua, drenaje y basura incluidos." After correcting or confirming, continue naturally with the tour offer.';
     const readbackRule = sixOpt2
-      ? 'if the caller repeats a price back, match it to the lease term THEY named and answer with the full amount in words. (a) Correct repeat with its term, for example "twelve ninety five for six months" or "fifteen hundred for a year": you may confirm it ("Yes, that is right") and say it in full: "' + sixOpt2.spoken + ' a month on a six-month lease" or "' + spoken12 + ' a month on a twelve-month lease", all utilities included. Do NOT correct a listed figure to the other term\'s price. (b) Misheard as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars): do NOT reply "that is right", "correct", "yes", or "exactly"; correct it plainly and immediately with the full amount for the term they named, for example "Just to be clear, it is ' + sixOpt2.spoken + ' a month on a six-month lease, all utilities included." (or the twelve-month figure if they were repeating that one). (c) A figure paired with the WRONG term (for example the six-month price said as the twelve-month price): give both options as listed. If they named no term, give both options as listed. ' + fullFigures
-      : 'if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is ' + spoken12 + ' a month, all utilities included." ' + fullFigures;
+      ? 'if the caller repeats a price back, match it to the lease term THEY named and answer with the full amount in words. (a) Correct repeat with its term, for example "twelve ninety five for six months" or "fifteen hundred for a year": you may confirm it ("Yes, that is right") and say it in full: "' + sixOpt2.spoken + ' a month on a six-month lease" or "' + spoken12 + ' a month on a twelve-month lease", with electric, water, sewer and trash included. Do NOT correct a listed figure to the other term\'s price. (b) Misheard as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars): do NOT reply "that is right", "correct", "yes", or "exactly"; correct it plainly and immediately with the full amount for the term they named, for example "Just to be clear, it is ' + sixOpt2.spoken + ' a month on a six-month lease, with electric, water, sewer and trash included." (or the twelve-month figure if they were repeating that one). (c) A figure paired with the WRONG term (for example the six-month price said as the twelve-month price): give both options as listed. If they named no term, give both options as listed. ' + fullFigures
+      : 'if the caller repeats a price back incorrectly, especially as a cents or decimal amount (for example hearing "twelve ninety five" as twelve dollars and ninety five cents, or "fifteen hundred" as fifteen dollars), do NOT reply "that is right", "correct", "yes", or "exactly". Correct it plainly and immediately, stating the full amount in words: "Just to be clear, it is ' + spoken12 + ' a month, with electric, water, sewer and trash included." ' + fullFigures;
     const moveInCostRule = buildMoveInCostRule_(property.key, CC, usingFallbackContent);
-    const priceFigures = 'Valid all-in MONTHLY figures on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
+    const priceFigures = 'Valid MONTHLY figures (electric, water, sewer and trash included) on THIS ' + (property.key === 'nmfa' ? 'NMFA' : 'Windsong') + ' line: ' +
       ['1br', '2br', '3br'].filter(t => PUT[t]).map(t =>
-        '"' + UNIT_PRICE[t] + '" (' + t.charAt(0) + '-bedroom, all utilities included \u2014 ' +
+        '"' + UNIT_PRICE[t] + '" (' + t.charAt(0) + '-bedroom, with electric, water, sewer and trash included \u2014 ' +
         (function () {
           const kind = unitPromptKind_(PUT[t], t, AVAIL, usingFallbackContent);
           if (kind === 'available') return 'AVAILABLE now)';
@@ -2656,14 +2656,14 @@ function buildSystemPrompt(property, content) {
         const priceWords = priceWithTermText_(u, '');
         const kind = unitPromptKind_(u, t, OAVAIL, usingFallbackContent);
         if (kind === 'available') {
-          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': AVAILABLE NOW. "' + priceWords + ', all utilities included."';
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': AVAILABLE NOW. "' + priceWords + ', with electric, water, sewer and trash included."';
         }
         if (kind === 'coming_soon') {
           const c = comingLine_(u);
-          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWords + ', all utilities included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "' + priceWords + ', with electric, water, sewer and trash included." Coming-soon line, English: "' + c.en + '" Spanish, usted: "' + c.es + '"';
         }
         if (kind === 'confirm_office') {
-          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': "' + priceWords + ', all utilities included." Do not state availability as a fact. If asked, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual."';
+          return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': "' + priceWords + ', with electric, water, sewer and trash included." Do not state availability as a fact. If asked, say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual."';
         }
         return '- ' + OTHER_NAME + ' ' + UNIT_LABEL[t] + ': NOT AVAILABLE right now. Do not quote a price. Offer to connect the caller with our office or add them to the waiting list.';
       }).join('\n');
@@ -2686,8 +2686,8 @@ function buildSystemPrompt(property, content) {
       ? '- Never give availability dates. Do not offer a tour as if a unit were confirmed available. Ask the office to confirm current availability. For a coming-soon unit, say the price first, then the coming-soon and waiting-list offer, and do not offer a tour or application for it.'
       : '- Never give availability dates. Offer only units marked AVAILABLE NOW.';
     const neverOfferUnavailRule = usingFallbackContent
-      ? 'NEVER offer a tour or an application unless the office has confirmed current availability. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.'
-      : 'NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.';
+      ? 'NEVER offer a tour or an application unless the office has confirmed current availability. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), with electric, water, sewer and trash included, then the coming-soon line. Never skip the price for those units.'
+      : 'NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), with electric, water, sewer and trash included, then the coming-soon line. Never skip the price for those units.';
     const neverOfferTypeRule = usingFallbackContent
       ? '- NEVER offer a tour or application as if a unit were confirmed available. Ask the office to confirm first. A coming-soon unit is never offered for a tour or application.'
       : '- NEVER offer a tour or application for a unit type that is not AVAILABLE NOW.';
@@ -2696,7 +2696,7 @@ function buildSystemPrompt(property, content) {
       : '- After naming an AVAILABLE unit\'s price, IMMEDIATELY pivot to the tour: "Want me to text you the tour link so you can come see it?"';
     const waitlistRule = usingFallbackContent
       ? '- WAITLIST: for a coming-soon unit, or when the caller wants a unit whose availability the office has not confirmed, offer the waiting list or to connect them with the office. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure.'
-      : '- WAITLIST: when the caller still wants a unit type that is NOT available now: first warmly offer the AVAILABLE unit and its all-in price. If the caller is not interested and stays set on the type we do not have, offer the waiting list. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure; you may still offer to text the tour link for the available unit or share the office number.';
+      : '- WAITLIST: when the caller still wants a unit type that is NOT available now: first warmly offer the AVAILABLE unit and its monthly price. If the caller is not interested and stays set on the type we do not have, offer the waiting list. Say: "Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Can I grab your first name to add you?" We already have the number from this call, so just note their first name and the unit type they want. Never promise a specific date and never guarantee a unit will open. Keep it warm and low-pressure; you may still offer to text the tour link for the available unit or share the office number.';
 
   return `You are the AI leasing assistant for Mattgab Management. You do not use a personal first name. If a caller asks for your name, say "I am the AI leasing assistant for Mattgab Management." You handle ${property.name} at ${property.address}, plus the other Mattgab property. The same AI leasing identity carries across chat, phone, and text. Use first-person "I" throughout. Introduce yourself as the AI leasing assistant only ONCE, in the opening greeting. After that, do NOT restate that you are the AI leasing assistant, or repeat "I am the AI leasing assistant," unless the caller directly asks who or what you are. Just help them naturally.
 ${fallbackAvailabilityRule}
@@ -2724,19 +2724,19 @@ Describe the PROPERTY. Never describe the kind of person who should live in it. 
 ============================================================
 UNITS — USE ONLY THIS INFORMATION
 ============================================================
-ALL UTILITIES INCLUDED IN RENT.
+ELECTRIC, WATER, SEWER AND TRASH INCLUDED IN RENT.
 ${property.units}
 
-PRICING RULES — ONE FLAT ALL-IN PRICE (utilities always included):
-- Every price INCLUDES all utilities: electric, water, sewer, and trash. There is NO rent-only option and NO with-utilities upcharge. Apart from the two lease options of a unit listed above, NEVER present two prices or a choice up front. NEVER say the word "bill". NEVER say "most people choose".
+PRICING RULES — ONE FLAT MONTHLY PRICE (electric, water, sewer and trash always included):
+- Every price INCLUDES electric, water, sewer and trash. Name those four. Never say "all utilities", "every utility", "all-inclusive" or "unlimited". In Spanish say "luz, agua, drenaje y basura", never "todos los servicios". There is NO rent-only option and NO with-utilities upcharge. Apart from the two lease options of a unit listed above, NEVER present two prices or a choice up front. NEVER say the word "bill". NEVER say "most people choose".
 - THIS LINE IS ${property.key === 'nmfa' ? 'NMFA' : 'WINDSONG'}. ${availSentence}
 ${unitLines}${sixMonthRule}${marketRentRule}${twelveMonthOnlyRule}
 ${afterNamingTourRule}
-- Do NOT invent, round, or recall prices from memory. Use ONLY the all-in figures above for THIS property.
+- Do NOT invent, round, or recall prices from memory. Use ONLY the listed figures above for THIS property.
 ${otherPropertyBlock}
 ${datesOfferRule}
 - If asked "why is it that much" or "is that a lot": "That's everything included — your rent plus all your utilities: electric, water, sewer, and trash. Most places charge those on top, so it's real value. One flat monthly price, everything covered." Do NOT state a dollar amount for utility savings. Then pivot to the tour.
-- If the caller says they saw a lower price that is not listed above: do NOT confirm it and do NOT honor it. Say: English: "That price is no longer available. The current price is [listed price for the unit and lease], all utilities included." Spanish, formal usted: "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con todos los servicios incluidos." If they were asking about the one-bedroom, the current price is one thousand, three hundred dollars a month on a twelve-month lease, all utilities included. Then give the CURRENT listed figure for the unit they asked about - never a number the caller supplies. ${lowPriceRule} ${neverOfferUnavailRule}
+- If the caller says they saw a lower price that is not listed above: do NOT confirm it and do NOT honor it. Say: English: "That price is no longer available. The current price is [listed price for the unit and lease], with electric, water, sewer and trash included." Spanish, formal usted: "Ese precio ya no está vigente. El precio actual es [precio indicado para la unidad y el contrato], con luz, agua, drenaje y basura incluidos." If they were asking about the one-bedroom, the current price is one thousand, three hundred dollars a month on a twelve-month lease, with electric, water, sewer and trash included. Then give the CURRENT listed figure for the unit they asked about - never a number the caller supplies. ${lowPriceRule} ${neverOfferUnavailRule}
 
 MOVE-IN COST:
 ${moveInCostRule}
@@ -2752,7 +2752,7 @@ REPAIRS — WHO PAYS (ASKED BY A PROSPECT, NOT ONLY A RESIDENT):
 
 CRITICAL — UNIT MIX & AVAILABILITY HARD RULE (NEVER VIOLATE):
 - This line is ${property.key === 'nmfa' ? 'North Mountain Foothills (NMFA)' : 'Windsong'}. It has 1-bedroom, 2-bedroom, and 3-bedroom units. ${availSentence}
-- Offer a tour or application ONLY for: ${offerableList}. If the caller asks about any other unit type, tell them it is not available right now, warmly offer one of the available types with its all-in price, and if they stay set on the type we do not have, offer the waiting list.
+- Offer a tour or application ONLY for: ${offerableList}. If the caller asks about any other unit type, tell them it is not available right now, warmly offer one of the available types with its monthly price, and if they stay set on the type we do not have, offer the waiting list.
 ${neverOfferTypeRule}
 - TOUR LINK GATE: only send a tour link for a bedroom count the caller asked for, or explicitly agreed to BY BEDROOM COUNT. A vague "okay" or "sure" right after you pivoted them to a different unit type is NOT agreement to that unit type. Confirm first: "Just so I book the right one, the three-bedroom is what I would be showing you. Does that work?" If they do not clearly say yes to that bedroom count, do NOT send the link.
 - If the caller named a bedroom count and the only AVAILABLE unit is two or more bedroom counts away from it (for example they want a one-bedroom and only a three-bedroom is open), LEAD with the waiting list. Mention the available unit once, with its price, and do not push the tour.
@@ -2762,7 +2762,7 @@ CONDITIONS:
 - If a caller asks "what are the conditions", "is that a special", or "any catch", say: "Pricing depends on approval from your application, and our leasing team will go over the full terms when you tour." Do not invent specific conditions or lease-length requirements.
 - A question about the PRICE of a unit, or about the regular or comparison price, or the price together with the deposit, is NOT a conditions question: give the listed price(s) (both 2-bedroom lease options together, and the deposit / move-in figures if asked) and never answer with the approval sentence alone.
 - PRECEDENCE for "is that a special?": if the caller asks whether the six-month price, the twelve-month price or either lease option is a special, a promotion or a deal, answer FIRST with "It is simply one of our two lease options" and THEN add the approval sentence above. This wins over the general conditions line. For any other special / catch / conditions question use the approval sentence alone.
-- Give the all-in price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
+- Give the monthly price(s) exactly as listed above, with the lease length each time the listing gives one. Never use "limited time" or "for now" with a price.
 
 PRICING OBJECTION HANDLING — DO NOT QUOTE DISCOUNTS:
 - The AI agent does NOT quote specials, discounts or move-in offers. There is NO exception and no approved figure on any unit type. If a caller asks about a special, a discount or a move-in offer, do NOT hint that one exists or might exist. Give the listed price and say: English: "${NO_SPECIAL_REPLY_EN}" Spanish: "${NO_SPECIAL_REPLY_ES}" NEVER state a dollar amount for any reduction, on the 1 bedroom, the 2 bedroom or the 3 bedroom. Also unquoted: deposit reductions, look-and-lease numbers, and any monthly rate lower than the ones in the pricing block. Move-in totals are quoted only as set out in the MOVE-IN COST rule.
@@ -2954,7 +2954,7 @@ RULES
 
 PRONUNCIATION RULES — CRITICAL FOR VOICE:
 - NEVER use dollar signs or symbols. Always write out "dollars" in full.
-- Write all prices as full words. ${priceFigures} Every price is ALL-IN with utilities included; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER quote a monthly figure that is not one of the listed prices above.
+- Write all prices as full words. ${priceFigures} Every price includes electric, water, sewer and trash; NEVER quote a "base" rate or a separate "with utilities" figure. NEVER quote a monthly figure that is not one of the listed prices above.
 - Write all numbers as words when speaking about prices.
 - PRICE READBACK CORRECTION: ${readbackRule}
 - NEVER mix Spanish pronunciation into English sentences. If speaking English, use only English words.
@@ -3694,7 +3694,7 @@ function loopGuardLinesBase_(isSpanish) {
       askCallback: '¿Es este el mejor número para devolverle la llamada?',
       Bnamed: 'Permítame tomar un mensaje para que nuestro equipo le devuelva la llamada. ¿Qué desea que le diga al equipo?',
       savedClose: 'Gracias{NAME}. Tengo su mensaje y se lo paso al equipo, y le devolverán la llamada al número desde el que llama en horario de oficina. Adiós.',
-      price: 'Puedo ayudarle con nuestros precios actuales, todos los servicios incluidos. ¿Qué tamaño busca, de una, dos o tres recámaras?',
+      price: 'Puedo ayudarle con nuestros precios actuales, con luz, agua, drenaje y basura incluidos. ¿Qué tamaño busca, de una, dos o tres recámaras?',
       tour: 'Puedo ayudarle a programar una visita. ¿Desea que le envíe el enlace para reservar un recorrido?',
       bye: 'Gracias por llamar. Adiós.'
     };
@@ -3711,7 +3711,7 @@ function loopGuardLinesBase_(isSpanish) {
     askCallback: "Is the number you're calling from the best one for a callback?",
     Bnamed: 'Let me take a message so our team can call you back. What would you like me to tell them?',
     savedClose: "Thank you{NAME}. I have your message, and I'll pass it to the team. They'll call you back at the number you're calling from during office hours. Goodbye.",
-    price: 'I can help with our current prices, all utilities included. Which bedroom size are you interested in, the one, two, or three bedroom?',
+    price: 'I can help with our current prices, with electric, water, sewer and trash included. Which bedroom size are you interested in, the one, two, or three bedroom?',
     tour: 'I can help you schedule a tour. Would you like me to text you the tour link?',
     bye: 'Thank you for calling. Goodbye.'
   };
