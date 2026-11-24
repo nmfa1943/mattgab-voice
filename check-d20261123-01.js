@@ -140,7 +140,7 @@ test('1c guard: the lead 200112 reply (deposit added on top) is replaced with th
 test('1d guard leaves correct answers and real prices alone (3BR $3,300 is a real total)', () => {
   const ok = ['The total due at move-in, including the deposit of one thousand dollars, is two thousand, five hundred dollars on a twelve-month lease, with no admin fee, subject to change depending on the application.',
     'For the three bedroom the total due at move-in is up to three thousand, three hundred dollars, subject to change depending on the application.',
-    'The two bedroom is one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, all utilities included.',
+    'The two bedroom is one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, with electric, water, sewer and trash included.',
     'The pet fee is two hundred fifty dollars plus thirty five dollars a month pet rent.'];
   for (const t of ok) assert.equal(api.fixMoveInDoubleCount_(t, { property: NMF, content: LIVE }), t);
   // fallback content: no figures known, nothing changes

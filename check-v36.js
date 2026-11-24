@@ -59,12 +59,12 @@ module.exports = {
 
 const api = loadHelpers();
 
-const PRICE_1BR = 'one thousand, three hundred dollars a month on a twelve-month lease only, all utilities included';
-const PRICE_3BR = 'one thousand, eight hundred dollars a month on a twelve-month lease only, all utilities included';
+const PRICE_1BR = 'one thousand, three hundred dollars a month on a twelve-month lease only, with electric, water, sewer and trash included';
+const PRICE_3BR = 'one thousand, eight hundred dollars a month on a twelve-month lease only, with electric, water, sewer and trash included';
 const COMING = 'Coming available soon. I can connect you with our office or add you to our waiting list.';
 const UNAVAIL_PREFIX = 'NOT available right now, coming available soon. ALWAYS say the price first, then the coming-soon line. Never skip the price. Price: "';
 const TWELVE_RULE = 'The 1-bedroom and the 3-bedroom are twelve-month leases only, at both properties. Say "twelve months only" whenever you give their price. Do not offer a six-month option for them.';
-const NEVER_RULE = 'NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), all utilities included, then the coming-soon line. Never skip the price for those units.';
+const NEVER_RULE = 'NEVER offer a tour or an application for a unit that is not AVAILABLE NOW. If a unit is listed as not available but has a price and a coming-soon line, ALWAYS say that price first (including "twelve months only" when the listing says so), with electric, water, sewer and trash included, then the coming-soon line. Never skip the price for those units.';
 
 function liveContent() {
   const content = JSON.parse(JSON.stringify(api.DEFAULT_CONTENT));
@@ -107,7 +107,7 @@ test('NMF prompt states 1BR and 3BR as twelve-month only and keeps both 2BR term
   const p = prompt('nmfa');
   assert.match(p, new RegExp('1 bedroom: "' + PRICE_1BR.replace(/[.]/g, '\\.') + '\\." AVAILABLE NOW'));
   assert.match(p, new RegExp('3 bedroom: "' + PRICE_3BR.replace(/[.]/g, '\\.') + '\\." AVAILABLE NOW'));
-  assert.match(p, /2 bedroom: "one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, all utilities included\." AVAILABLE NOW/);
+  assert.match(p, /2 bedroom: "one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, with electric, water, sewer and trash included\." AVAILABLE NOW/);
   assert.equal(p.includes('NEVER offer or price a unit that is not AVAILABLE NOW'), false);
   assert.ok(p.includes(NEVER_RULE));
   assert.ok(p.includes(TWELVE_RULE));
@@ -145,11 +145,11 @@ test('units block formats 1BR and 3BR with twelve-month only at both properties'
   const content = liveContent();
   const nmfa = api.renderUnitsBlock('nmfa', content);
   const ws = api.renderUnitsBlock('windsong', content);
-  assert.match(nmfa, new RegExp('1 bedroom: ' + PRICE_1BR.replace(/[.]/g, '\\.') + ' \\(electric, water, sewer, and trash\\)\\. AVAILABLE NOW\\.'));
-  assert.match(nmfa, new RegExp('3 bedroom: ' + PRICE_3BR.replace(/[.]/g, '\\.') + ' \\(electric, water, sewer, and trash\\)\\. AVAILABLE NOW\\.'));
-  assert.match(ws, /1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease only, all utilities included\. NOT available right now, coming available soon\./);
-  assert.match(ws, /3 bedroom: one thousand, eight hundred dollars a month on a twelve-month lease only, all utilities included\. NOT available right now, coming available soon\./);
-  assert.match(nmfa, /2 bedroom: one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, all utilities included/);
+  assert.match(nmfa, new RegExp('1 bedroom: ' + PRICE_1BR.replace(/[.]/g, '\\.') + '\\. AVAILABLE NOW\\.'));
+  assert.match(nmfa, new RegExp('3 bedroom: ' + PRICE_3BR.replace(/[.]/g, '\\.') + '\\. AVAILABLE NOW\\.'));
+  assert.match(ws, /1 bedroom: one thousand, three hundred dollars a month on a twelve-month lease only, with electric, water, sewer and trash included\. NOT available right now, coming available soon\./);
+  assert.match(ws, /3 bedroom: one thousand, eight hundred dollars a month on a twelve-month lease only, with electric, water, sewer and trash included\. NOT available right now, coming available soon\./);
+  assert.match(nmfa, /2 bedroom: one thousand, five hundred dollars a month on a twelve-month lease, or one thousand, two hundred ninety five dollars a month on a six-month lease, with electric, water, sewer and trash included/);
   assert.equal(nmfa.includes('twelve-month lease only') && nmfa.includes('2 bedroom:'), true);
   assert.equal(/2 bedroom:[^\n]*twelve-month lease only/.test(nmfa), false);
 });
