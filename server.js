@@ -5119,11 +5119,13 @@ function offersToText(text) {
 // D-20261120-05: every tour goes through the one booking page (tour.php).
 // Spanish callers get the Spanish page (lang=es). The base link already has
 // ?property=, so the language is appended with &.
+// D-20261124-11: every link Leo texts carries src=leo-phone, so the booking page saves where the tour came from.
 function tourLinkFor_(property, isSpanish) {
   const base = String((property && property.tour_link) || '');
   if (!base) return base;
-  if (!isSpanish) return base;
-  return base + (base.includes('?') ? '&' : '?') + 'lang=es';
+  const tagged = base + (base.includes('?') ? '&' : '?') + 'src=leo-phone';
+  if (!isSpanish) return tagged;
+  return tagged + '&lang=es';
 }
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
