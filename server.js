@@ -5127,6 +5127,303 @@ function tourLinkFor_(property, isSpanish) {
   if (!isSpanish) return tagged;
   return tagged + '&lang=es';
 }
+
+// --- BEGIN LEO TOUR TOOLS (D-20261125-07; check-d20261125-07.js evaluates the text between these markers) ---
+// Phone-side tour tools: open times, book, find, reschedule and cancel, against the real tour.php calendar through
+// mattgabmanagement.com/leo-tour-api.php (same X-API-Key as the lead post). OFF unless the Railway variable
+// LEO_TOUR_TOOLS=1 is set; with it off, every call runs exactly the pre-D-07 code path.
+// Safety rules enforced in code, not only in the prompt:
+//   * the caller's phone is ALWAYS the caller ID of this call (session.from); the model can never pass a phone number,
+//   * book / reschedule / cancel run only after Leo read the date back on the previous turn AND the caller said yes,
+//   * Leo never says booked / moved / cancelled unless the API answered ok on this call (claim guard),
+//   * pets are saved only when the caller brought pets up; there is no income, budget, job, credit or background field.
+const LEO_TOUR_TOOLS_FLAG = String(process.env.LEO_TOUR_TOOLS || '') === '1';
+const LEO_TOUR_API_URL = process.env.LEO_TOUR_API_URL || 'https://mattgabmanagement.com/leo-tour-api.php';
+const LEO_TOUR_API_TIMEOUT_MS = 6000;
+const LEO_TOUR_MAX_STEPS = 4;
+const LEO_TOUR_MODEL = 'claude-haiku-4-5-20251001';
+
+function leoTourToolsOn_() { return LEO_TOUR_TOOLS_FLAG && !!AI_LEAD_KEY; }
+
+function leoTourPropKey_(property) {
+  const k = String((property && property.key) || '').toLowerCase();
+  return k === 'nmfa' ? 'nmf' : (k === 'windsong' ? 'windsong' : '');
+}
+
+const LEO_TOUR_TOOL_DEFS = [
+  {
+    name: 'tour_find_times',
+    description: 'Look up OPEN tour times on the real booking calendar for this property. Use it before offering any time. Returns up to 3 times (starts_at plus when_en / when_es to speak). If the date has no times it says why (holiday, closed, full, past, too_far) and gives the next open day.',
+    input_schema: { type: 'object', properties: {
+      date: { type: 'string', description: 'YYYY-MM-DD the caller asked for, or empty for the next open day. Today is given in TOUR TOOLS STATE.' },
+      part_of_day: { type: 'string', enum: ['any', 'morning', 'afternoon'] },
+      after_time: { type: 'string', description: 'HH:MM, 24-hour, only if the caller said after a certain time.' }
+    } }
+  },
+  {
+    name: 'tour_book',
+    description: 'Book the tour time the caller chose. Call ONLY after you read the property, day, date and time back on your previous turn and the caller said yes. Phone number is taken from the caller ID automatically: never ask for it.',
+    input_schema: { type: 'object', required: ['starts_at', 'first_name', 'bedrooms', 'caller_confirmed'], properties: {
+      starts_at: { type: 'string', description: 'Exact starts_at value from tour_find_times. Never spoken.' },
+      first_name: { type: 'string', description: 'Caller first name as they said it.' },
+      bedrooms: { type: 'integer', enum: [1, 2, 3], description: 'Bedroom size the caller wants.' },
+      move_in: { type: 'string', description: 'When they want to move in, in their words, if they said it.' },
+      pets: { type: 'string', description: 'ONLY if the caller brought up pets themselves: what they said. Otherwise leave empty. Never ask.' },
+      caller_confirmed: { type: 'boolean', description: 'true only when the caller said yes to your read-back.' }
+    } }
+  },
+  {
+    name: 'tour_find_booking',
+    description: 'Find the caller\'s upcoming tour so it can be moved or cancelled. Verifies by the caller ID of this call plus the first name on the booking.',
+    input_schema: { type: 'object', required: ['first_name'], properties: {
+      first_name: { type: 'string', description: 'First name the tour was booked under, as the caller says it.' }
+    } }
+  },
+  {
+    name: 'tour_reschedule',
+    description: 'Move a found tour to a new open time. Call ONLY after you read back the new day, date and time and the caller said yes.',
+    input_schema: { type: 'object', required: ['tour_ref', 'first_name', 'new_starts_at', 'caller_confirmed'], properties: {
+      tour_ref: { type: 'integer', description: 'tour_ref from tour_find_booking. Never spoken.' },
+      first_name: { type: 'string' },
+      new_starts_at: { type: 'string', description: 'Exact starts_at from tour_find_times. Never spoken.' },
+      caller_confirmed: { type: 'boolean' }
+    } }
+  },
+  {
+    name: 'tour_cancel',
+    description: 'Cancel a found tour. Call ONLY after you read back which tour (day, date, time) and the caller said yes, cancel it.',
+    input_schema: { type: 'object', required: ['tour_ref', 'first_name', 'caller_confirmed'], properties: {
+      tour_ref: { type: 'integer' },
+      first_name: { type: 'string' },
+      caller_confirmed: { type: 'boolean' }
+    } }
+  }
+];
+
+// Replaces the "you do not have access to the booking system" paragraph when the tools are on.
+const LEO_TOUR_RESCHEDULE_OLD_RE_ = /If the caller says they want to "reschedule," "change my tour,"[\s\S]*?Do not use the deprecated "Feel free to call or text this number anytime" wording\./;
+function leoTourPromptBlock_(property) {
+  return [
+    'TOUR BOOKING ON THE PHONE (D-20261125-07). You can check open tour times, book a tour, and move or cancel an existing tour on this call with the tour tools. These rules override any line above that says you cannot book or that only the office can reschedule.',
+    '- Offer it simply: "I can book a time for you right now, or text you our tour link. Which would you prefer?" If they prefer the link, follow the tour link rules as usual.',
+    '- Times come ONLY from tour_find_times. Never invent, guess or promise a time. Offer two or three times at most. If a day has no times, say why in one short phrase (for example Thanksgiving or Christmas Day, or the office is closed that day) and offer the next open day the tool gave.',
+    '- Before booking you need the caller\'s first name and the bedroom size. Ask move-in timing if you do not have it yet (the normal PROSPECT INTAKE). Never ask about income, budget, job, credit or background. Never ask about pets; only pass pets if the caller brought them up.',
+    '- READ BACK, THEN CONFIRM: before tour_book, say the community, the day, the date and the time from when_en (English) or when_es (Spanish) word for word, and ask "Shall I book that for you?" / "¿Se lo reservo?". Call tour_book with caller_confirmed true ONLY after the caller says yes to that read-back. Same for moving ("Shall I move your tour to ...?") and cancelling ("Shall I cancel your tour on ...?").',
+    '- NEVER say a tour is booked, moved or cancelled until the tool answers ok:true. If the tool answers confirm_first, read the time back and ask. If it answers slot_taken, say that time was just taken and offer the alternatives it gave. If it answers has_existing, tell them they already have a tour at that time (when_en / when_es) and offer to move it. If it answers unavailable, stopped or error, do not retry: offer to text the tour link or give the office number ' + ((property && property.phone) || '') + '.',
+    '- After ok:true for a booking, say: "You\'re all set. Your tour at [community] is [when]. It\'s a quick ten-minute tour. We look forward to seeing you." (Spanish: "Listo. Su recorrido en [comunidad] es [when_es]. Es un recorrido rápido de diez minutos. Le esperamos.") Then continue: ask how they heard about us if not asked yet, then "Is there anything else I can help you with?"',
+    '- EXISTING TOUR (reschedule, change, cancel, "I already have a tour"): ask only for the first name the tour is under, then call tour_find_booking. The caller ID of this call is checked automatically; never ask for or read a phone number. If it answers not_verified, say: "I couldn\'t find a tour under that name for the number you\'re calling from. Our office can look it up for you at ' + ((property && property.phone) || '') + '." Do not say whether a tour exists.',
+    '- Never say tour_ref, starts_at or any id out loud. Speak times only from when_en / when_es. In Spanish, use when_es exactly.',
+  ].join('\n');
+}
+
+function leoTourSystemPrompt_(system, session) {
+  let s = String(system || '');
+  const block = leoTourPromptBlock_(session && session.property);
+  s = LEO_TOUR_RESCHEDULE_OLD_RE_.test(s) ? s.replace(LEO_TOUR_RESCHEDULE_OLD_RE_, block) : s + '\n\n' + block;
+  return s + leoTourStateHint_(session);
+}
+
+function leoTourNowPhx_() {
+  const p = new Date(Date.now() - 7 * 3600 * 1000);   // America/Phoenix, no DST
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return { ymd: p.toISOString().slice(0, 10), dow: days[p.getUTCDay()], hm: p.toISOString().slice(11, 16) };
+}
+
+function leoTourStateHint_(session) {
+  const st = (session && session.tourState) || {};
+  const n = leoTourNowPhx_();
+  const lines = ['', '', 'TOUR TOOLS STATE (internal; never read ids aloud): today is ' + n.dow + ' ' + n.ymd + ', ' + n.hm + ' Phoenix time.'];
+  if (st.offered && st.offered.length) lines.push('Times you last offered: ' + st.offered.map(o => o.starts_at + ' = "' + (session.isSpanish ? o.when_es : o.when_en) + '"').join('; ') + '.');
+  if (st.found && st.found.length) lines.push('Caller\'s upcoming tours (verified): ' + st.found.map(t => 'tour_ref ' + t.tour_ref + ' = "' + (session.isSpanish ? t.when_es : t.when_en) + '"').join('; ') + '.');
+  if (st.booked) lines.push('BOOKED on this call (API ok): "' + (session.isSpanish ? st.booked.when_es : st.booked.when_en) + '". If you have not told the caller yet, tell them now.');
+  if (st.cancelled) lines.push('CANCELLED on this call (API ok): "' + (session.isSpanish ? st.cancelled.when_es : st.cancelled.when_en) + '".');
+  return lines.join('\n');
+}
+
+const LEO_TOUR_MONTHS_ = [
+  ['january', 'enero'], ['february', 'febrero'], ['march', 'marzo'], ['april', 'abril'], ['may', 'mayo'], ['june', 'junio'],
+  ['july', 'julio'], ['august', 'agosto'], ['september', 'septiembre'], ['october', 'octubre'], ['november', 'noviembre'], ['december', 'diciembre']
+];
+const LEO_TOUR_DAY_WORDS_ = ['', 'first|one', 'second|two', 'third|three', 'fourth|four', 'fifth|five', 'sixth|six', 'seventh|seven', 'eighth|eight', 'ninth|nine', 'tenth|ten',
+  'eleventh|eleven', 'twelfth|twelve', 'thirteenth|thirteen', 'fourteenth|fourteen', 'fifteenth|fifteen', 'sixteenth|sixteen', 'seventeenth|seventeen', 'eighteenth|eighteen',
+  'nineteenth|nineteen', 'twentieth|twenty', 'twenty[- ]?first|twenty[- ]?one|veintiuno', 'twenty[- ]?second|twenty[- ]?two|veintidos', 'twenty[- ]?third|twenty[- ]?three|veintitres',
+  'twenty[- ]?fourth|twenty[- ]?four|veinticuatro', 'twenty[- ]?fifth|twenty[- ]?five|veinticinco', 'twenty[- ]?sixth|twenty[- ]?six|veintiseis', 'twenty[- ]?seventh|twenty[- ]?seven|veintisiete',
+  'twenty[- ]?eighth|twenty[- ]?eight|veintiocho', 'twenty[- ]?ninth|twenty[- ]?nine|veintinueve', 'thirtieth|thirty|treinta', 'thirty[- ]?first|thirty[- ]?one|treinta y uno'];
+function leoTourFlat_(s) { return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''); }
+
+// Did this assistant line read back the date of startsAt ('YYYY-MM-DD HH:MM:SS')? Needs the month (EN or ES) and the day.
+function leoTourReadBackHas_(line, startsAt) {
+  const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})/.exec(String(startsAt || ''));
+  if (!m) return false;
+  const t = leoTourFlat_(line);
+  const mon = LEO_TOUR_MONTHS_[Number(m[2]) - 1];
+  const day = Number(m[3]);
+  const monthOk = new RegExp('\\b(' + mon[0] + '|' + mon[1] + '|' + mon[0].slice(0, 3) + ')\\b').test(t);
+  const dayOk = new RegExp('\\b(' + day + '(st|nd|rd|th)?|' + LEO_TOUR_DAY_WORDS_[day] + ')\\b').test(t);
+  return monthOk && dayOk;
+}
+
+// Matched on accent-flattened text, so a bare "sí" counts (isConsentAffirmative's \b does not match after an accented í).
+const LEO_TOUR_CONFIRM_EXTRA_RE_ = /\b(si|claro|dale|adelante|perfecto|esta bien|por favor|book it|do it|that one|correct|that's right|thats right|confirm|confirmo|cancel it|cancelalo|cancelala|cancela|move it|cambialo|reservalo|reservala|reserva|de acuerdo|asi es|eso es|exacto)\b/;
+function leoTourCallerSaidYes_(text) {
+  const t = leoTourFlat_(text);
+  if (/\b(no|not|don't|dont|wait|hold on|espera|mejor no)\b/.test(t)) return false;
+  return isConsentAffirmative(text) || LEO_TOUR_CONFIRM_EXTRA_RE_.test(t);
+}
+
+// The read-back must be on Leo's line right before the caller's current turn, and the current turn must be a yes.
+function leoTourConfirmed_(session, startsAt) {
+  const conv = (session && session.conversation) || [];
+  const last = conv[conv.length - 1];
+  if (!last || last.role !== 'user') return false;
+  let prev = null;
+  for (let i = conv.length - 2; i >= 0; i--) { if (conv[i].role === 'assistant') { prev = conv[i]; break; } if (conv[i].role === 'user') break; }
+  if (!prev) return false;
+  return leoTourReadBackHas_(prev.content, startsAt) && leoTourCallerSaidYes_(last.content);
+}
+
+const LEO_TOUR_PET_RE_ = /\b(pet|pets|dog|dogs|cat|cats|puppy|kitten|perro|perros|perrito|gato|gatos|mascota|mascotas)\b/;
+function leoTourCallerRaisedPets_(session) {
+  return ((session && session.conversation) || []).some(m => m && m.role === 'user' && LEO_TOUR_PET_RE_.test(leoTourFlat_(m.content)));
+}
+
+async function leoTourApi_(payload) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), LEO_TOUR_API_TIMEOUT_MS);
+  try {
+    const r = await fetch(LEO_TOUR_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': AI_LEAD_KEY },
+      body: JSON.stringify(payload),
+      signal: ctl.signal
+    });
+    if (r && r.status && r.status !== 200) return { ok: false, error: 'unavailable' }; // STOP (503), key (403), etc.
+    let j = null;
+    try { j = await r.json(); } catch (e) { j = null; }
+    if (!j || typeof j !== 'object') return { ok: false, error: 'unavailable' };
+    return j;
+  } catch (e) {
+    return { ok: false, error: 'unavailable' };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Runs one tool call. Returns the object handed back to the model. Never throws.
+async function leoTourExec_(session, name, input) {
+  input = input || {};
+  const st = session.tourState || (session.tourState = { offered: [], found: [], booked: null, cancelled: null, okThisTurn: [] });
+  const property = leoTourPropKey_(session.property);
+  const phone = String(session.from || '');
+  const lang = session.isSpanish ? 'es' : 'en';
+  if (!property) return { ok: false, error: 'unavailable' };
+  try {
+    if (name === 'tour_find_times') {
+      const part = ['morning', 'afternoon'].indexOf(input.part_of_day) !== -1 ? input.part_of_day : '';
+      const res = await leoTourApi_({ action: 'slots', property, date: /^\d{4}-\d{2}-\d{2}$/.test(input.date || '') ? input.date : '', part, after: /^\d{2}:\d{2}$/.test(input.after_time || '') ? input.after_time : '' });
+      const offered = (res.slots && res.slots.length) ? res.slots : ((res.next && res.next.slots) || []);
+      if (offered.length) st.offered = offered;
+      return res;
+    }
+    if (name === 'tour_book') {
+      if (!phone) return { ok: false, error: 'no_caller_id' };
+      if (input.caller_confirmed !== true || !leoTourConfirmed_(session, input.starts_at)) {
+        const o = (st.offered || []).find(x => x.starts_at === input.starts_at);
+        return { ok: false, error: 'confirm_first', when_en: o && o.when_en, when_es: o && o.when_es };
+      }
+      const payload = { action: 'book', property, starts_at: String(input.starts_at || ''), name: String(input.first_name || ''), phone, language: lang,
+        bedrooms: Number(input.bedrooms) || 0, move_in: String(input.move_in || '').slice(0, 60) };
+      if (leoTourCallerRaisedPets_(session) && String(input.pets || '').trim()) { payload.pets_raised = true; payload.pets = String(input.pets).slice(0, 80); }
+      const res = await leoTourApi_(payload);
+      if (res.ok) { st.booked = { tour_ref: res.tour_ref, starts_at: res.starts_at || payload.starts_at, when_en: res.when_en, when_es: res.when_es }; st.okThisTurn.push('book'); st.found = [st.booked]; }
+      return res;
+    }
+    if (name === 'tour_find_booking') {
+      if (!phone) return { ok: false, error: 'not_verified' };
+      const res = await leoTourApi_({ action: 'find', property, phone, name: String(input.first_name || '') });
+      if (res.ok) st.found = res.tours || [];
+      return res;
+    }
+    if (name === 'tour_reschedule') {
+      if (!phone) return { ok: false, error: 'not_verified' };
+      if (input.caller_confirmed !== true || !leoTourConfirmed_(session, input.new_starts_at)) {
+        const o = (st.offered || []).find(x => x.starts_at === input.new_starts_at);
+        return { ok: false, error: 'confirm_first', when_en: o && o.when_en, when_es: o && o.when_es };
+      }
+      const res = await leoTourApi_({ action: 'reschedule', tour_ref: Number(input.tour_ref) || 0, phone, name: String(input.first_name || ''), new_starts_at: String(input.new_starts_at || '') });
+      if (res.ok) { st.booked = { tour_ref: res.tour_ref || Number(input.tour_ref) || 0, starts_at: res.starts_at || String(input.new_starts_at || ''), when_en: res.when_en, when_es: res.when_es }; st.found = [st.booked]; st.okThisTurn.push('reschedule'); }
+      return res;
+    }
+    if (name === 'tour_cancel') {
+      if (!phone) return { ok: false, error: 'not_verified' };
+      const t = (st.found || []).find(x => Number(x.tour_ref) === Number(input.tour_ref));
+      if (!t) return { ok: false, error: 'not_verified' };
+      if (input.caller_confirmed !== true || !leoTourConfirmed_(session, t.starts_at)) return { ok: false, error: 'confirm_first', when_en: t.when_en, when_es: t.when_es };
+      const res = await leoTourApi_({ action: 'cancel', tour_ref: Number(input.tour_ref) || 0, phone, name: String(input.first_name || '') });
+      if (res.ok) { st.cancelled = { when_en: res.when_en, when_es: res.when_es }; st.found = []; st.booked = null; st.okThisTurn.push('cancel'); }
+      return res;
+    }
+    return { ok: false, error: 'unknown_tool' };
+  } catch (e) {
+    return { ok: false, error: 'unavailable' };
+  }
+}
+
+// "You're booked" / "I moved it" / "it's cancelled" with no API success on this call is replaced with a safe line.
+const LEO_TOUR_CLAIM_RE_ = {
+  book: /\b(you'?re (all )?set for (your|a|the) tour|you'?re booked|i'?ve (booked|scheduled)|i (booked|scheduled) (you|your|a|the)|booked you|your tour (at [^.?!]{0,40} )?is (booked|confirmed|scheduled|set)|your tour( at [^.?!]{0,40})? is (on )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|su recorrido( en [^.?!]{0,40})? es (el )?(lunes|martes|miercoles|jueves|viernes|sabado|domingo)|queda(ra)? (reservad|confirmad|agendad)|ya (esta|quedo) (reservad|agendad)|le (he )?(reserv|agend)[eé]|su recorrido (esta|quedo) (reservad|confirmad|agendad))/i,
+  reschedule: /\b(i'?ve (moved|rescheduled)|i (moved|rescheduled)|your tour (is|has been) (moved|rescheduled)|(lo|la) (he )?cambi[eé]|su recorrido (ahora )?(es|queda) (el|para))/i,
+  cancel: /\b(i'?ve cancel+ed|i cancel+ed|your tour (is|has been) cancel+ed|(is|has been|was|now) cancel+ed\b|(lo|la) (he )?cancel[eé]|su recorrido (esta|quedo|ha sido) cancelad|(esta|queda|quedo|fue|ha sido) cancelad[oa])/i
+};
+function leoTourGuardClaims_(text, session) {
+  const st = (session && session.tourState) || {};
+  const flat = leoTourFlat_(text);
+  const okBook = !!st.booked || (st.found || []).length > 0 || (st.okThisTurn || []).indexOf('book') !== -1;
+  const okRes = (st.okThisTurn || []).indexOf('reschedule') !== -1 || !!st.booked;
+  const okCan = !!st.cancelled;
+  const bad = (LEO_TOUR_CLAIM_RE_.book.test(flat) && !okBook) || (LEO_TOUR_CLAIM_RE_.reschedule.test(flat) && !okRes) || (LEO_TOUR_CLAIM_RE_.cancel.test(flat) && !okCan);
+  if (!bad) return { text, replaced: false };
+  const phone = (session && session.property && session.property.phone) || '';
+  const safe = session && session.isSpanish
+    ? 'Todavía no está guardado. Si gusta, le envío nuestro enlace para reservar por texto, o puede llamar a nuestra oficina al ' + phone + '.'
+    : "That isn't saved yet. I can text you our tour link, or you can call our office at " + phone + '.';
+  return { text: safe, replaced: true };
+}
+
+// One caller turn with tools. Returns the final text, or null when the turn was aborted (barge-in / new prompt).
+async function runLeoTourTurn_(session, system, handle, onFiller) {
+  const st = session.tourState || (session.tourState = { offered: [], found: [], booked: null, cancelled: null, okThisTurn: [] });
+  st.okThisTurn = [];
+  const msgs = session.conversation.slice(1).map(m => ({ role: m.role, content: m.content }));
+  let fillerSent = false;
+  for (let step = 0; step < LEO_TOUR_MAX_STEPS; step++) {
+    const resp = await anthropic.messages.create({
+      model: LEO_TOUR_MODEL, max_tokens: 300, system: leoTourSystemPrompt_(system, session), messages: msgs, tools: LEO_TOUR_TOOL_DEFS
+    });
+    if (handle.aborted) return null;
+    const blocks = (resp && resp.content) || [];
+    const uses = blocks.filter(b => b && b.type === 'tool_use');
+    const said = blocks.filter(b => b && b.type === 'text').map(b => b.text).join(' ').trim();
+    if (!uses.length || resp.stop_reason !== 'tool_use') return said;
+    if (!fillerSent && typeof onFiller === 'function') { fillerSent = true; onFiller(); }
+    msgs.push({ role: 'assistant', content: blocks });
+    const results = [];
+    for (const u of uses) {
+      const out = await leoTourExec_(session, u.name, u.input);
+      if (handle.aborted) return null;
+      results.push({ type: 'tool_result', tool_use_id: u.id, content: JSON.stringify(out) });
+    }
+    msgs.push({ role: 'user', content: results });
+  }
+  const phone = (session.property && session.property.phone) || '';
+  return session.isSpanish
+    ? 'Disculpe, no pude completar eso. Puedo enviarle nuestro enlace para reservar por texto, o puede llamar a nuestra oficina al ' + phone + '.'
+    : "Sorry, I couldn't finish that. I can text you our tour link, or you can call our office at " + phone + '.';
+}
+
+function leoTourFiller_(isSpanish) { return isSpanish ? 'Un momento, lo reviso.' : 'One moment, let me check.'; }
+// --- END LEO TOUR TOOLS ---
+
 function detectSmsIntent(text) {
   const lower = text.toLowerCase();
   // F-20261015-02. Accent-insensitive copy used for every test below. The model
@@ -5290,6 +5587,55 @@ function nextSpanishVoiceFallback_(session, description, nowMs) {
 
 function spanishLanguageElement_() {
   return `      <Language code="${SPANISH_TTS_LANGUAGE}" ttsProvider="${SPANISH_TTS_PROVIDER}" voice="${spanishVoiceString_(SPANISH_VOICE_ID)}" transcriptionProvider="${SPANISH_STT_PROVIDER}" speechModel="${SPANISH_STT_MODEL}" />\n`;
+}
+
+// D-20261125-07: the end of a model turn (repeat guard, polish, voice, SMS link), moved out of stream.on('finalMessage')
+// unchanged so the tour-tools path ends its turns exactly the same way.
+async function finishLeoTurn_(session, ws, fullResponse, text) {
+  const guardedModel = applyLeoRepeatGuard_(session, fullResponse, Date.now());
+  if (guardedModel.hangUp) {
+    const ended = finishLoopGuardHangup_(session, guardedModel.step || 'C', guardedModel.reply, Date.now());
+    ws.send(JSON.stringify({ type: 'text', token: speakableReply_(ended.spoken, session.isSpanish), last: true }));
+    await maybePostAndHangUpFromGuard_(session, ws, ended);
+    return;
+  }
+  fullResponse = maybePrependSoftCap_(session, guardedModel.reply, Date.now());
+  const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
+  const spoken = commitAssistantReply(session, fullResponse, {
+    property: session.property,
+    isFirstAssistantTurn,
+    alreadyIntroduced: true,
+    callerAskedWhoYouAre: callerAskedWhoYouAre(session.conversation),
+    isSpanish: session.isSpanish
+  });
+  fullResponse = spoken;
+  const toVoice = speakableReply_(spoken, session.isSpanish);
+  ws.send(JSON.stringify({ type: 'text', token: toVoice, last: true }));
+  console.log(`AI said: ${spoken}`);
+  if (toVoice !== spoken) console.log(`AI voiced: ${toVoice}`);
+
+  // Detect and send SMS links (tour checked FIRST)
+  const intent = detectSmsIntent(fullResponse);
+  if (intent && !session.sent.includes(intent) && session.from) {
+    // A2P 10DLC backstop: tour/apply links require an explicit affirmative
+    // on the caller's triggering turn. Portal is resident-requested, not gated.
+    // Consent counts if it is on THIS turn (original behaviour, kept)
+    // or was latched earlier in the call against a texting offer.
+    const consented = isConsentAffirmative(text) || session.smsConsent === true;
+    if ((intent === 'tour' || intent === 'apply') && !consented) {
+      console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn and none latched: "${(text || '').slice(0, 60)}"`);
+    } else {
+      session.sent.push(intent);
+      const { property, to, from } = session;
+      if (intent === 'tour') {
+        await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${tourLinkFor_(property, session.isSpanish)}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
+      } else if (intent === 'apply') {
+        await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our leasing team will follow up with you. Reply STOP to unsubscribe.`);
+      } else if (intent === 'portal') {
+        await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor maintenance emergencies call ${MAINTENANCE_EMERGENCY}. Reply STOP to unsubscribe.`);
+      }
+    }
+  }
 }
 
 // The TwiML returned by POST /voice. With SPANISH_DECLARE_IN_TWIML=false this is byte-for-byte the pass 12 TwiML.
@@ -5489,6 +5835,43 @@ fastify.register(async function(fastify) {
             }
           }
 
+          // D-20261125-07: phone tour tools (Railway LEO_TOUR_TOOLS=1). Off = the stream path below, unchanged.
+          if (leoTourToolsOn_()) {
+            const systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish, property: session.property });
+            const handle = { aborted: false, abort() {
+              if (this.aborted) return;
+              this.aborted = true;
+              if (session.activeStream !== handle) return;   // abortActiveGeneration already cleared it and handled barge-in
+              session.activeStream = null;
+              session.pendingBufferedTurn = '';
+              handleBargeIn(session, '', { isSpanish: session.isSpanish });
+            } };
+            session.activeStream = handle;
+            session.activeStreamStartedAt = Date.now();   // pass 17: reply timeout
+            session.pendingBufferedTurn = '';
+            try {
+              const said = await runLeoTourTurn_(session, systemForTurn, handle, () => {
+                if (!handle.aborted && session.activeStream === handle) ws.send(JSON.stringify({ type: 'text', token: speakableReply_(leoTourFiller_(session.isSpanish), session.isSpanish), last: true }));
+              });
+              if (said === null || handle.aborted || session.activeStream !== handle) break;
+              session.activeStream = null;
+              const guarded = leoTourGuardClaims_(said, session);
+              if (guarded.replaced) console.warn('Tour claim guard: replaced a booking claim with no API success');
+              await finishLeoTurn_(session, ws, guarded.text, text);
+            } catch (err) {
+              if (handle.aborted || session.activeStream !== handle) break;
+              session.activeStream = null;
+              session.pendingBufferedTurn = '';
+              console.error('Claude tour-tools error:', err.message);
+              if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_error'); break; }
+              const fallback = session.isSpanish
+                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
+                : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
+              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+            }
+            break;
+          }
+
           try {
             let fullResponse = '';
             let aborted = false;
@@ -5518,50 +5901,7 @@ fastify.register(async function(fastify) {
               if (session.activeStream !== stream) return;
               session.activeStream = null;
               session.pendingBufferedTurn = '';
-              const guardedModel = applyLeoRepeatGuard_(session, fullResponse, Date.now());
-              if (guardedModel.hangUp) {
-                const ended = finishLoopGuardHangup_(session, guardedModel.step || 'C', guardedModel.reply, Date.now());
-                ws.send(JSON.stringify({ type: 'text', token: speakableReply_(ended.spoken, session.isSpanish), last: true }));
-                await maybePostAndHangUpFromGuard_(session, ws, ended);
-                return;
-              }
-              fullResponse = maybePrependSoftCap_(session, guardedModel.reply, Date.now());
-              const isFirstAssistantTurn = !session.conversation.some(m => m.role === 'assistant');
-              const spoken = commitAssistantReply(session, fullResponse, {
-                property: session.property,
-                isFirstAssistantTurn,
-                alreadyIntroduced: true,
-                callerAskedWhoYouAre: callerAskedWhoYouAre(session.conversation),
-                isSpanish: session.isSpanish
-              });
-              fullResponse = spoken;
-              const toVoice = speakableReply_(spoken, session.isSpanish);
-              ws.send(JSON.stringify({ type: 'text', token: toVoice, last: true }));
-              console.log(`AI said: ${spoken}`);
-              if (toVoice !== spoken) console.log(`AI voiced: ${toVoice}`);
-
-              // Detect and send SMS links (tour checked FIRST)
-              const intent = detectSmsIntent(fullResponse);
-              if (intent && !session.sent.includes(intent) && session.from) {
-                // A2P 10DLC backstop: tour/apply links require an explicit affirmative
-                // on the caller's triggering turn. Portal is resident-requested, not gated.
-                // Consent counts if it is on THIS turn (original behaviour, kept)
-                // or was latched earlier in the call against a texting offer.
-                const consented = isConsentAffirmative(text) || session.smsConsent === true;
-                if ((intent === 'tour' || intent === 'apply') && !consented) {
-                  console.warn(`SMS consent gate: withheld ${intent} link — no affirmative on caller turn and none latched: "${(text || '').slice(0, 60)}"`);
-                } else {
-                  session.sent.push(intent);
-                  const { property, to, from } = session;
-                  if (intent === 'tour') {
-                    await sendSms(from, to, `Here's the link to book your tour at ${property.name}:\n${tourLinkFor_(property, session.isSpanish)}\n\nWe look forward to seeing you! Reply STOP to unsubscribe.`);
-                  } else if (intent === 'apply') {
-                    await sendSms(from, to, `Here's your application link for ${property.name}:\n${property.apply_link || APPLY_LINK}\n\nOnce submitted, our leasing team will follow up with you. Reply STOP to unsubscribe.`);
-                  } else if (intent === 'portal') {
-                    await sendSms(from, to, `Here's your Tenant Web Access portal:\n${TENANT_PORTAL}\n\nFor maintenance emergencies call ${MAINTENANCE_EMERGENCY}. Reply STOP to unsubscribe.`);
-                  }
-                }
-              }
+              await finishLeoTurn_(session, ws, fullResponse, text);
             });
 
             // Caller barge-in (ConversationRelay 'interrupt') calls stream.abort()
