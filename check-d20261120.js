@@ -152,7 +152,9 @@ test('F2 transfer words reach the existing office handoff (EN and ES), not the m
     const s = session(NMF);
     const [r] = run(s, [[w, 'MENU']]);
     assert.equal(r.intercepted, 'loop_guard_keyword_office', w);
-    assert.ok(r.spoken.includes(String(NMF.phone).replace(/extension/i, /[ñáéíóú]|gerente|encargado|representante|persona/.test(w) ? 'extensión' : 'extension')), w + ' -> ' + r.spoken);
+    // D-20261124-14: first handoff asks for the name and says open/closed; no weekly hours or menu.
+    assert.match(r.spoken, /What's your first name, and what's it about\?|¿Me puede dar su nombre y decirme de qué se trata\?/, w + ' -> ' + r.spoken);
+    assert.doesNotMatch(r.spoken, /Which would you like|¿Qué le gustaría/, w + ' -> ' + r.spoken);
   }
 });
 
@@ -162,13 +164,14 @@ test('F2 self-descriptions and head counts are not transfer requests', () => {
   assert.equal(api.officeRequestIntent_('una persona', { lastAssistant: '¿Cuántas personas vivirían en el departamento?' }), null);
 });
 
-test('F2 a second ask after the handoff takes the message; "Ya" to the message offer starts it', () => {
+test('F2 a second ask after the handoff takes the message; a repeat person-ask is not captured as a name', () => {
   let s = session(NMF);
   let out = run(s, [['representative', 'x'], ['I already called, I need a manager', 'x']]);
   assert.equal(out[1].intercepted, 'loop_guard_keyword_message');
   assert.match(out[1].spoken, /Can I get your first name\?/);
+  assert.doesNotMatch(out[1].spoken, /What would you like me to tell them/);
   s = session(NMF);
-  out = run(s, [['someone in charge', 'x'], ['Ya', 'MODEL']]);
+  out = run(s, [['someone in charge', 'x'], ['I need a manager', 'MODEL']]);
   assert.equal(out[1].intercepted, 'loop_guard_keyword_message');
 });
 
@@ -318,6 +321,7 @@ test('F7 a caller who keeps asking for a representative is handed off, then the 
   assert.equal(out[1].intercepted, 'loop_guard_keyword_office');
   assert.equal(out[2].intercepted, 'loop_guard_keyword_message');
   assert.match(out[2].spoken, /Can I get your first name\?/);
+  assert.doesNotMatch(out[2].spoken, /What would you like me to tell them|Which would you like/);
   assert.equal(out.some(r => r.intercepted === 'loop_guard_A' || r.hungUp), false);
 });
 

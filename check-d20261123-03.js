@@ -113,11 +113,11 @@ test('handoff and second-ask lines on a holiday offer the message, English and S
   const s = { property: NMF, conversation: [] };
   const en = api.officeHandoffLine_(s, false, t);
   assert.match(en, /closed all day for Thanksgiving/);
-  assert.match(en, /Would you like to leave a message\?$/);
-  assert.doesNotMatch(en, /office is open, until/);
+  assert.match(en, /What's your first name, and what's it about\?$/);
+  assert.doesNotMatch(en, /office is open, until|Monday through Friday|Would you like to leave a message/);
   const es = api.officeHandoffLine_(s, true, t);
   assert.match(es, /cerrada todo el día por el Día de Acción de Gracias/);
-  assert.match(es, /a este número\. ¿Desea dejar un mensaje\?$/);
+  assert.match(es, /¿Me puede dar su nombre y decirme de qué se trata\?$/);
   const second = api.officeSecondAskLine_({ property: WS, conversation: [] }, false, phx(2026, 12, 25, 14, 0));
   assert.match(second, /^Today the office is closed all day for Christmas Day\. It opens tomorrow at ten A M\. I'll take your message right now/);
   const secondEs = api.officeSecondAskLine_({ property: WS, conversation: [] }, true, phx(2026, 12, 25, 14, 0));
