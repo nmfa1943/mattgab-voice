@@ -175,17 +175,19 @@ test('2a open right now, per property, America/Phoenix time', () => {
   assert.deepEqual(api.OFFICE_HOURS.windsong.schedule.saturday, [10, 15]);
 });
 
-test('2b first handoff: the message offer comes FIRST, then the number, hours once, open-now status, EN and formal ES', () => {
+test('2b first handoff (D-20261124-14): name first, open-now status, no weekly hours unless asked, EN and formal ES', () => {
   const t = phx(2026, 11, 20, 14, 31);
   const en = api.officeHandoffLine_({ property: NMF, conversation: [] }, false, t);
-  assert.ok(en.indexOf('take a message') < en.indexOf('602-997-2928'), en);
-  assert.match(en, /Right now the office is open, until five P M\. Would you like to leave a message\?$/);
-  assert.equal((en.match(/2928/g) || []).length, 1);
+  assert.match(en, /^Of course\. I can take a message for the team\. Right now the office is open, until five P M\. What's your first name, and what's it about\?$/);
+  assert.doesNotMatch(en, /2928|Monday through Friday|nine A M to five P M/);
   const es = api.officeHandoffLine_({ property: NMF, conversation: [] }, true, t);
-  assert.ok(es.indexOf('tomarle un mensaje') < es.indexOf('602-997-2928'), es);
-  assert.match(es, /En este momento la oficina está abierta/);
-  assert.match(es, /a este número\. ¿Desea dejar un mensaje\?$/);
+  assert.match(es, /^Claro\. Puedo tomarle un mensaje para el equipo\. En este momento la oficina está abierta, hasta las cinco de la tarde\. ¿Me puede dar su nombre y decirme de qué se trata\?$/);
+  assert.doesNotMatch(es, /2928|lunes a viernes/);
   assert.doesNotMatch(es, /\b(tú|te|puedes|quieres)\b/);
+  const withHours = api.officeHandoffLine_({ property: NMF, conversation: [] }, false, t, { includeHours: true });
+  assert.match(withHours, /What's your first name, and what's it about\?$/);
+  assert.match(withHours, /Monday through Friday, nine A M to five P M/);
+  assert.ok(withHours.indexOf('Right now the office is open') < withHours.indexOf('Monday through Friday'), withHours);
 });
 
 function session(prop, extra) {
@@ -223,8 +225,10 @@ test('2d a second ask after the guard handoff, with the name already captured, a
     ['I want to speak to a manager', '(model)'],
     ['No I just want to talk to a real person', '(model)'],
   ], phx(2026, 11, 21, 11, 0));
-  assert.match(out[1].spoken, /^Of course\. I can take a message right now/);
-  assert.match(out[1].spoken, /Saturdays are by appointment only/);
+  assert.match(out[1].spoken, /^Of course\. I can take a message for the team\./);
+  assert.match(out[1].spoken, /Right now the office is closed\. Saturdays are by appointment only/);
+  assert.match(out[1].spoken, /What's your first name, and what's it about\?$/);
+  assert.doesNotMatch(out[1].spoken, /Monday through Friday|2928/);
   const last = out[2].spoken;
   assert.doesNotMatch(last, /2928|two nine two eight/);
   assert.match(last, /Right now the office is closed\./);
@@ -245,7 +249,8 @@ test('2f model-path hints: "is the office open?" gets the open-now line; repeat 
   assert.match(h2, /Do NOT read the office number or the hours again/);
   const p = api.buildSystemPrompt(Object.assign({}, NMF, { units: '' }), LIVE);
   assert.match(p, /SECOND ASK FOR A PERSON/);
-  assert.match(p, /Offer the message FIRST/);
+  assert.match(p, /ask for their first name and what it is about FIRST/);
+  assert.doesNotMatch(p, /do NOT ask for their name first/);
 });
 
 // ---------------- Fix 3: intake ----------------
@@ -309,7 +314,7 @@ test('4b lead 200116 shape: the resident row is NON-LEAD FOR VIOLA with status r
   const lines = api.loopGuardLines_(false, s);
   assert.equal(lines.askMessage, 'Thanks. And what would you like me to tell Viola?');
   assert.match(api.loopGuardLines_(true, s).askMessage, /a Viola\?$/);
-  assert.match(api.officeHandoffLine_(s, false, phx(2026, 11, 21, 13, 0)), /have Viola call you back/);
+  assert.match(api.officeHandoffLine_(s, false, phx(2026, 11, 21, 13, 0)), /take a message for Viola/);
   const log = console.log; console.log = () => {}; const err = console.error; console.error = () => {};
   try { await api.postLeadToDashboard(s); } finally { console.log = log; console.error = err; }
   const row = posted.find(p => /lead/.test(p.url)).body;

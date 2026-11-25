@@ -73,8 +73,11 @@ const OFFICE_HOURS = {
       daysEs: ['el domingo', 'el lunes', 'el martes', 'el miércoles', 'el jueves', 'el viernes', 'el sábado'] }
   },
   windsong: {
-    // Source: Jenea, 9:26 AM MST Nov 23, 2026 (D-20261123-03): WindSong is Mon-Fri 9-5,
-    // Sat 10-3, closed Sunday. Confirmed; matches the values below and the content store.
+    // Source: values match the website and shared/HOURS.md. D-20261123-03 note (Jenea, 9:26 AM MST Nov 23, 2026 (D-20261123-03)):
+    // WindSong is Mon-Fri 9-5, Sat 10-3, closed Sunday. D-20261124-14: NEEDS JENEA CONFIRM.
+    // Leo Call Bot relayed a confirmation at that time, but Jenea's own words for these
+    // WindSong hours were not found in that chat (her holiday words were). She later asked
+    // the team to confirm hours for NMF and WindSong. Values are unchanged.
     en: 'Monday through Friday, nine A M to five P M, Saturday ten A M to three P M, closed Sunday.',
     es: 'Nuestra oficina está abierta de lunes a viernes, de nueve de la mañana a cinco de la tarde, y los sábados de diez de la mañana a tres de la tarde. Los domingos está cerrada.',
     enWritten: 'Mon–Fri 9 AM–5 PM, Saturday 10 AM–3 PM, Sunday closed',
@@ -1268,6 +1271,43 @@ function nameSpellHint_(conversation, opts) {
 // (a) "Is the office open / closed?" gets the open-right-now line, not the weekly hours alone (lead 200114).
 // (b) a repeat ask for a person, after the office line was given, goes straight to the message.
 const OFFICE_OPEN_Q_RE_ = /\b(is|are) (the |your )?(office|you|you guys|yall|leasing office|leasing) (open|closed|still open|closing)\b|\b(open|closed) (right now|now|today|yet)\b|\bwhat time (do|does) (you|the office|it) (close|open)\b|\bwhen (do|does) (you|the office) (close|open)\b|\besta (abierta|cerrada) la oficina\b|\bla oficina esta (abierta|cerrada)\b|\b(estan|esta) abiert[oa]s?\b|\ba que hora (cierran|abren)\b/;
+// D-20261124-14: weekly hours only when the caller asked for hours, not for
+// a plain "is the office open right now?" or a manager request alone.
+const OFFICE_HOURS_Q_RE_ = /\b(what (are|is) (your|the) (office )?hours|office hours|hours of operation|what days are you open|are you open on (the )?(weekend|saturday|sunday)|horario(s)?( de (la )?oficina)?|a que hora (cierran|abren|abren ustedes)|cual es el horario)\b/i;
+function officeHoursAsked_(text) {
+  const norm = normalizeLoopText_(text);
+  if (!norm) return false;
+  if (OFFICE_HOURS_Q_RE_.test(norm)) return true;
+  if (OFFICE_OPEN_Q_RE_.test(norm) && /\b(hour|hours|horario|what time|a que hora|que hora)\b/.test(norm)) return true;
+  return false;
+}
+
+// D-20261124-14 fix 2 (lead 200121): after Leo asked for a name and the caller
+// gave one, continue with the request. Never fall back to the main menu.
+const MENU_LINE_EN_ = 'I can help with prices, availability, scheduling a tour, or taking a message for our team. Which would you like?';
+const MENU_LINE_ES_ = 'Puedo ayudarle con precios, disponibilidad, programar una visita o tomar un mensaje para nuestro equipo. ¿Qué le gustaría?';
+function nameContinueHint_(conversation, opts) {
+  opts = opts || {};
+  const convo = conversation || [];
+  if (convo.length < 2) return '';
+  const last = convo[convo.length - 1];
+  const prev = convo[convo.length - 2];
+  if (!last || last.role !== 'user' || !prev || prev.role !== 'assistant') return '';
+  if (!NAME_ASK_TAIL_RE_.test(prev.content || '')) return '';
+  const reply = String(last.content || '').trim()
+    .replace(/^[¿¡]+\s*/, '')
+    .replace(/^(mi primer nombre es|my (?:first|1st) name is|first name is|my name is|it'?s|i'?m|i am|this is|me llamo|soy|mi nombre es)\s+/i, '')
+    .trim();
+  if (!reply) return '';
+  if (/^(no|nope|why|not|prefer not|no gracias|rather not)\b/i.test(reply)) return '';
+  const first = reply.split(/\s+/).filter(Boolean)[0] || '';
+  const firstOk = first && isValidName_(unspell_(first));
+  const wholeOk = isValidName_(unspell_(reply));
+  if (!firstOk && !wholeOk) return '';
+  const menu = opts.isSpanish ? MENU_LINE_ES_ : MENU_LINE_EN_;
+  return '\n\nTHIS TURN ONLY: the caller just gave their name. Thank them by their first name and CONTINUE with their earlier request on this call (take the message, send the tour link, answer the question). Do NOT return to the main menu. Never say "' + menu + '"';
+}
+
 function officeTurnHints_(conversation, opts) {
   opts = opts || {};
   const lastUser = recentUserTurns_(conversation, 1).join(' ');
@@ -1278,7 +1318,8 @@ function officeTurnHints_(conversation, opts) {
   if (officeRequestIntent_(lastUser) && officeLineAlreadyGiven_(conversation || [])) {
     out += '\n\nTHIS TURN ONLY: the caller asked for a person AGAIN, and you already gave the office number on this call. Do NOT read the office number or the hours again. Go straight to TAKE THE MESSAGE. Say: "' + officeSecondAskLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '"';
   } else if (officeRequestIntent_(lastUser)) {
-    out += '\n\nTHIS TURN ONLY: the caller asked for a person. Offer the message first and say whether the office is open right now. Say: "' + officeHandoffLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '"';
+    const includeHours = officeHoursAsked_(lastUser);
+    out += '\n\nTHIS TURN ONLY: the caller asked for a manager or a person. Ask for their first name and what it is about FIRST. Say whether the office is open right now. ' + (includeHours ? 'They also asked about hours, so give the official weekly hours once after the open-now line. ' : 'Do NOT recite office hours unless the caller asks for hours. Do NOT read the weekly hours. ') + 'Say: "' + officeHandoffLine_(fakeSession, !!opts.isSpanish, opts.nowMs, { includeHours: includeHours }) + '"';
   } else if (OFFICE_OPEN_Q_RE_.test(norm)) {
     out += '\n\nTHIS TURN ONLY: the caller asked whether the office is open. Answer that first, exactly: "' + officeStatusLine_(fakeSession, !!opts.isSpanish, opts.nowMs) + '" Then offer to take a message or help with anything else, in one short question.';
   }
@@ -1299,6 +1340,7 @@ function buildTurnSystemHints(conversation, opts) {
   suffix += prospectIntakeHint_(conversation, opts);
   suffix += petFollowupHint_(conversation, opts);
   suffix += nameSpellHint_(conversation, opts);
+  suffix += nameContinueHint_(conversation, opts);
   if (shouldAskOpenQuestion(conversation)) {
     const q = opts.isSpanish ? OPEN_QUESTION_ES : OPEN_QUESTION_EN;
     suffix += '\n\nTHIS TURN ONLY: the caller has given two unclear one-word replies to an either/or question. Do not repeat the either/or. Ask one open question: "' + q + '"';
@@ -2233,6 +2275,33 @@ function ensureMaintenanceExtension_(text, conversation, opts) {
   return parts.join(' ');
 }
 
+// D-20261124-14: if Leo just got the caller's name and the model fell back
+// to the main menu (lead 200121), replace it and continue the request.
+function isMenuLine_(text) {
+  const n = normalizeLoopText_(text);
+  if (!n) return false;
+  return n === normalizeLoopText_(MENU_LINE_EN_) || n === normalizeLoopText_(MENU_LINE_ES_) ||
+    /^i can help with prices, availability/.test(n) || /^puedo ayudarle con precios, disponibilidad/.test(n);
+}
+function rewriteMenuAfterName_(spoken, session, opts) {
+  opts = opts || {};
+  if (!isMenuLine_(spoken)) return spoken;
+  const conv = (session && session.conversation) || [];
+  if (!nameContinueHint_(conv, { isSpanish: !!(opts.isSpanish || (session && session.isSpanish)) })) return spoken;
+  const isSpanish = !!(opts.isSpanish || (session && session.isSpanish));
+  const name = loopGuardCapturedName_(session) || '';
+  const first = name ? String(name).split(/\s+/)[0] : '';
+  const officeAsk = conv.some(m => m && m.role === 'user' && officeRequestIntent_(m.content || ''));
+  if (isSpanish) {
+    const who = messageForViola_(session) ? ' a Viola' : ' al equipo';
+    if (officeAsk) return 'Gracias' + (first ? ', ' + first : '') + '. ¿Qué desea que le diga' + who + '?';
+    return 'Gracias' + (first ? ', ' + first : '') + '. Sigo con lo que me pidió.';
+  }
+  const who = messageForViola_(session) ? 'Viola' : 'the team';
+  if (officeAsk) return 'Thanks' + (first ? ', ' + first : '') + '. What would you like me to tell ' + who + '?';
+  return 'Thanks' + (first ? ', ' + first : '') + '. Let me continue with what you asked about.';
+}
+
 function commitAssistantReply(session, rawText, opts) {
   opts = opts || {};
   let spoken = neverEmptyReply(polishAssistantReply(rawText, opts), opts);
@@ -2247,6 +2316,7 @@ function commitAssistantReply(session, rawText, opts) {
   spoken = ensureQuoteQualifier_(spoken, Object.assign({ quoteQualifierEn: storeQ.en, quoteQualifierEs: storeQ.es }, opts));
   spoken = ensureMaintenanceExtension_(spoken, session.conversation, opts);
   spoken = ensureIntakeBeforeClose_(spoken, session, opts);   // D-20261123-01 fix 3
+  spoken = rewriteMenuAfterName_(spoken, session, opts);      // D-20261124-14
   session.conversation = session.conversation || [];
   session.conversation.push({ role: 'assistant', content: spoken });
   session.replyCommitted = true;
@@ -2832,6 +2902,7 @@ QUALIFICATION — HELP FIRST, NAME AND QUALIFIERS COME NATURALLY (DO NOT INTERRO
 - Do NOT ask for the caller's name as your opening move, and do NOT run qualifying questions before you have helped with what they called about. Give them the price, the availability, or the answer they asked for, THEN continue naturally.
 - Capture the caller's FIRST NAME at a natural moment: right before you text a tour or application link, or add them to the waiting list. Say "Happy to help. Can I get your first name?" You need a name before sending a link anyway, so ask then. Confirm warmly ("Thanks, Mary.") and NEVER re-ask it once captured.
 - A short reply that could be a name ("Mary", "Marcus", "It's Mary"), given right after YOU asked for the name, IS the name. Capture it, do not re-ask. Speech-to-text may add a question mark to a bare name; it is still a name.
+- AFTER THE NAME (D-20261124-14): when you just got the caller's name, thank them and continue with their request (take the message, send the tour link, answer the question). Never return to the main menu. Never say "I can help with prices, availability, scheduling a tour, or taking a message for our team. Which would you like?"
 - PROSPECT INTAKE (Jenea, Nov 20 2026): after you have helped with what a prospect asked, collect these three, ONE per turn, woven in naturally, each asked only once in the call: (1) which bedroom size they want, unless they already said, (2) when they are looking to move in, (3) how they heard about us. Then offer the next step: the tour link for an AVAILABLE unit type, or the waiting list for a type that is not available now (for example the three bedroom). If the caller skips one, move on.
 - If the first name you heard is unusual, unclear, or sounds cut off or misheard, ask ONCE: "Sorry, could you spell your first name for me?" (Spanish: "Disculpe, ¿me puede deletrear su nombre?"). Never ask for the name itself again.
 - If a caller just wants a price or a tour, give it immediately. Do NOT gate pricing, availability, or a tour behind name or qualifiers.
@@ -2893,9 +2964,9 @@ If the caller says they want to "reschedule," "change my tour," "move my appoint
 "For tour changes our team handles that directly. Please call our office at ${property.phone}. They can look up your booking and reschedule on the spot. ${thisStaffHoursEn}"
 Then close with the CLOSING template above (English or Spanish per call language). Do not use the deprecated "Feel free to call or text this number anytime" wording.
 
-If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," or similar, do NOT try to qualify them and do NOT ask for their name first. Some callers just want a person; they will hang up if forced to qualify before reaching one. On the SAME turn, share the office line:
-"Of course. I can take a message for you right now and have the team call you back, or you can reach our office at ${property.phone}. [say whether the office is open right now, from the THIS TURN ONLY office status line when one is given; otherwise: ${thisStaffHoursEn}] Would you like to leave a message?"
-Offer the message FIRST, in that same reply, before the caller can hang up (D-20261123-01, F-20260911-02). If they say no or hang up, that is fine. Do not push for a name, tour, or pricing.
+If the caller asks to "speak to someone," "speak to a person," "talk to a human," "talk to a real person," "I want a real agent," "give me a person," "I don't want to talk to a robot," "transfer me," "talk to a manager," or similar, ask for their first name and what it is about FIRST (D-20261124-14). On the SAME turn, say whether the office is open right now, from the THIS TURN ONLY office status line when one is given. Give the weekly office hours ONLY if the caller asks for hours. Do not recite the weekly hours on a manager request alone. Do not go back to the main menu after you have their name. Use this shape (swap in the open-now line from the hint):
+"Of course. I can take a message for the team. [open-now status]. What's your first name, and what's it about?"
+If they already gave a name, thank them and ask what it is about, then take the message. If they say no or hang up, that is fine. Do not push for a tour or pricing.
 SECOND ASK FOR A PERSON (D-20261123-01): if you ALREADY gave the office number on this call and the caller asks for a person again ("can I please speak to someone?"), do NOT read the number or the hours again. Say whether the office is open right now, then go straight to TAKE THE MESSAGE below, starting with their first name (or what they want you to pass on, if you already have the name). Never repeat the same number and hours twice in one call.
 IS THE OFFICE OPEN? If the caller asks whether the office is open or closed right now, answer with the open-right-now status line from the THIS TURN ONLY hint first, not the weekly hours alone.
 CURRENT RESIDENTS (D-20261123-01): if the caller says they live here now ("I live there", "I'm a resident", a unit transfer), they are NOT a leasing prospect. Do not pitch units, prices or tours. Their message is for Viola, not "the team": take a message for Viola.
@@ -2907,7 +2978,7 @@ Then confirm. If the caller gave a different callback number, read that number b
 BARE "MESSAGE" (D-20261112-22): if the caller's reply is just "message", "a message", "leave a message", "I want to leave a message", "mensaje", "un mensaje" or "dejar un mensaje" (for example in answer to the welcome greeting), that IS a request to leave a message. Do NOT ask what they are calling about first, do NOT read the office number, and do NOT treat it as unclear. Say "Of course. Can I get your first name?" and take the message right away, one question per turn: first name, then what they want to tell the team, then the best callback number ("Is the number you're calling from the best one for a callback?" If no, ask for the best number slowly). When you have all three, confirm in one sentence. If the caller gave a different callback number, read that number back once, digit by digit, in the confirmation: "Thank you, [Name]. I have your message, and I'll call you back at [their number, digit by digit]." If they said the number they are calling from is best, do not read a number back; say: "Thank you, [Name]. I have your message and the number to call back, and I'll pass it to the team." If the caller will not give a name or a message, thank them, say the team can call back at this number, and do not push.
 The same applies after you give a named staff member's extension from the STAFF-TO-EXTENSION MAPPING: if the caller says they could not reach that person, take the message.
 Never say "I'm not able to take messages." Never promise a callback "right away," "shortly," or at a specific time. Never say the team will call "today." If the caller describes an EMERGENCY, give the Maintenance line first per the EMERGENCY rule, then offer to take the message too.
-Spanish: "Claro. Puedo tomarle un mensaje ahora mismo para que el equipo le devuelva la llamada, o puede comunicarse con nuestra oficina al ${property.phone.replace(/extension/i, 'extensi\u00f3n')}. [diga si la oficina está abierta en este momento, con la línea de estado de la oficina de la indicación THIS TURN ONLY cuando la haya; si no: ${thisStaffHoursEs}] ¿Desea dejar un mensaje?" Then take the message in Spanish, one question per turn ("¿Me puede dar su nombre?", "¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
+Spanish (D-20261124-14, formal usted): "Claro. Puedo tomarle un mensaje para el equipo. [línea de si la oficina está abierta ahora, de la indicación THIS TURN ONLY]. ¿Me puede dar su nombre y decirme de qué se trata?" Give weekly hours only if the caller asks for them. Then take the message in Spanish, one question per turn ("¿Qué le digo al equipo?", "¿Es este el mejor número para devolverle la llamada?"), and confirm: "Gracias, [Nombre]. Le paso su mensaje al equipo y le devolverán la llamada en horario de oficina."
 
 ============================================================
 LANGUAGE RULES
@@ -2945,9 +3016,9 @@ RULES
 - NEVER state availability dates.
 - NEVER ask what time or day works for a tour. The caller picks a time from the tour booking link themselves.
 - NEVER send to office unless emergency or caller asks for a person.
-- Person requested: main office line ${property.phone}, ${property.hours}, and offer to take a message for a callback (see TAKE THE MESSAGE above). NEVER give this AI line (${property.ai_number}) as a way to reach staff — it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
+- Person requested (D-20261124-14): ask for their first name and what it is about first, say whether the office is open right now, and take a message for a callback (see TAKE THE MESSAGE above). Give weekly office hours only if the caller asks for hours. NEVER give this AI line (${property.ai_number}) as a way to reach staff - it reaches you, not a person. NEVER tell a caller they can text the office number; that has not been confirmed.
 - NO TRANSFER: Never say "I am connecting you", "hold on while I transfer", "one moment please" implying transfer, "let me transfer you", "I'll get someone for you", or any phrase that implies a live transfer to a human. Live transfer is not available (Task #100 was rolled back 2026-05-12).
-- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. ${nmfaStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${nmfaStaffHoursEs}" Do not also say "Our hours are" or "El horario de la oficina es" if that string is already a complete sentence. Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing. Leasing and resident questions go to Viola. When the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA NO LONGER WORKS HERE: if a caller asks for Felipa, do not route to her and do not say why she left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," then give Viola's NMFA number and hours (extension one, as above). STEPHANY NO LONGER WORKS HERE: if a caller asks for Stephany (or Stephanie, Stefanie, Estefani, Estefany, or Tiffany), do not route to her, do not give her personal hours, do not say her name, and do not say why she left. Route by the caller's need: leasing and resident questions go to Viola; maintenance goes to Jose. Emergencies stay on the existing Maintenance line, extension three. For leasing or a resident question, take a message for Viola. Say warmly: "${VIOLA_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${VIOLA_MESSAGE_ES}" For maintenance, take a message for Jose. Say warmly: "${JOSE_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${JOSE_MESSAGE_ES}" Ask for their first name if you do not have it, ask what they would like you to tell Viola or Jose, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to that person. Do not invent an extension or transfer number. Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. ${windsongStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${windsongStaffHoursEs}" Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Maintenance questions go to Jose. Emergencies stay on the Maintenance line, extension three. Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" request with no name given, use the property's default office line (${property.phone}) and default hours (${thisStaffHoursEn}). On a Spanish call, use the Spanish hours (${thisStaffHoursEs}) instead of the English hours. Read the phone number aloud digit by digit and the extension as a single digit. After giving the number close warmly: "Is there anything else I can help you with in the meantime?"
+- STAFF-TO-EXTENSION MAPPING: When a caller asks for a specific person, give the office number with the CORRECT extension AND HOURS for that person, NOT the default of the line they called on. Viola routes to NMFA: "six oh two, nine nine seven, two nine two eight, extension one. ${nmfaStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${nmfaStaffHoursEs}" Do not also say "Our hours are" or "El horario de la oficina es" if that string is already a complete sentence. Brian also works at NMFA and routes to the SAME number and extension as Viola: "six oh two, nine nine seven, two nine two eight, extension one," with the same hours as above. Viola is the face of the office and leads leasing. Leasing and resident questions go to Viola. When the caller has NOT asked for anyone by name, offer Viola. Brian handles leasing accounting and collections - balances, payment arrangements and account questions. Brian is still with us: if a caller asks for Brian by name, route to him normally and never say he has left. FELIPA NO LONGER WORKS HERE: if a caller asks for Felipa, do not route to her and do not say why she left - say warmly "Felipa is no longer with us. Viola handles leasing now and can help you with anything Felipa would have," then give Viola's NMFA number and hours (extension one, as above). STEPHANY NO LONGER WORKS HERE: if a caller asks for Stephany (or Stephanie, Stefanie, Estefani, Estefany, or Tiffany), do not route to her, do not give her personal hours, do not say her name, and do not say why she left. Route by the caller's need: leasing and resident questions go to Viola; maintenance goes to Jose. Emergencies stay on the existing Maintenance line, extension three. For leasing or a resident question, take a message for Viola. Say warmly: "${VIOLA_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${VIOLA_MESSAGE_ES}" For maintenance, take a message for Jose. Say warmly: "${JOSE_MESSAGE_EN}" If the call is in Spanish, use formal usted: "${JOSE_MESSAGE_ES}" Ask for their first name if you do not have it, ask what they would like you to tell Viola or Jose, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to that person. Do not invent an extension or transfer number. Angel routes to Windsong: "six oh two, nine nine seven, two nine two eight, extension two. ${windsongStaffHoursEn}" On a Spanish call, after the number give the Spanish hours exactly: "${windsongStaffHoursEs}" Jose routes to Maintenance: "six oh two, nine nine seven, two nine two eight, extension three." Maintenance questions go to Jose. Emergencies stay on the Maintenance line, extension three. Yanelia is still with NMFA. No extension for Yanelia is on file, so never invent one. If a caller asks for Yanelia, take a message for her: ask for their first name if you do not have it, ask what they would like you to tell Yanelia, and confirm that the number they are calling from is the best callback number. Then say you will pass the message to Yanelia. If the call is in Spanish, use formal usted: "Con gusto le tomo el mensaje para Yanelia. ¿Me puede dar su nombre y qué desea que le diga?" You may also give the main office number, six oh two, nine nine seven, two nine two eight, with no extension. For a generic "speak to a person" or manager request with no staff name given (D-20261124-14), ask for their first name and what it is about first, and say whether the office is open right now. Give the weekly hours (${thisStaffHoursEn}; on a Spanish call ${thisStaffHoursEs}) only if the caller asks for hours. After you have the name, continue taking the message. Do not return to the main menu.
 - NAME ALIASES (speech-to-text variants): Speech-to-text routinely mishears staff names. Treat all of these as routing-equivalent to the canonical name. For Felipa (NO LONGER EMPLOYED - do not route; give the departure message from the mapping above, then offer Viola): Salipa, Filipa, Felipe, Falipa, Philippa, Phylipa. For Stephany (NO LONGER EMPLOYED as of 2026-10-26 - do not route; do not say the name or why she left; take a message for Viola on leasing and resident questions, or for Jose on maintenance): Stephanie, Stefanie, Estefani, Estefany, Tiffany. For Viola (NMFA ext 1): Viyola, Violeta, Biola, Fiola, Violet. For Brian (NMFA ext 1, still employed, leasing accounting and collections): Bryan, Brain, Brien, Ryan. For Angel (Windsong ext 2): Anjel, Angie, Angela. For Jose (Maintenance ext 3): José, Joseph, Hose-A, Hosie. For Yanelia (still with NMFA; take a message, do not invent an extension): Yaneli, Yenelia, Janelia, Daniela, Janelle. If the heard name is close to a staff name but ambiguous, ask once: "Did you mean Viola, Brian, Angel, Jose, or Yanelia?" before routing. Never route on a name you are not at least reasonably confident of.
 - When sending a link say: "I am sending you the link right now" AFTER consent. The system will text it automatically.
 - Always end the call with the CLOSING template defined above (English: "Looking forward to meeting you, [Name]..." / Spanish: "Espero conocerle, [Nombre]..."). Do NOT use the deprecated "Feel free to call or text this number anytime" phrasing.
@@ -3119,7 +3190,7 @@ function isValidName_(s) {
   // was stored as a prospect named Gracias. Checked before adding: the \b anchor
   // and the first-word-only test mean real names are untouched, so "Yamileth"
   // survives "ya", "Nadia" survives "nada", and "Claudia" survives "claro".
-  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale|not important|not|none|private|unknown|why|important|confidential|anonymous)\b/i;
+  const junk = /^(sorry|pardon|confused|lost|ready|calling|interested|looking|me|i|quiero|quisiera|necesito|busco|mover|mudarme|mudar|dile|dime|want|wanna|need|yes|no|si|hi|hello|hola|um|uh|please|thanks|thank you|sure|okay|ok|maybe|today|tomorrow|now|here|there|just|nothing|alright|fine|good|great|the|a|an|utilities|utility|rent|price|pricing|available|availability|mhm|yeah|nope|trying|operator|operator answered|current|resident|current resident|hey|mande|qué|qué pasa|valuable|feedback|valuable feedback|speak|somebody|someone|person|human|manager|management|representative|representante|rep|supervisor|gerente|encargado|encargada|agent|agente|leasing|leasing team|office|amazon|delivery|package|ups|usps|fedex|hello there|good morning|good afternoon|good evening|buenos días|buenas tardes|buenas noches|buen día|buenos|gracias|muchas gracias|de nada|bueno|buenas|claro|vale|mande usted|ahorita|igualmente|mucho gusto|por favor|perdón|perdon|disculpe|disculpa|adiós|adios|con permiso|está bien|esta bien|muy bien|nada|pues|entonces|a ver|oiga|oye|regreso|luego|después|despues|nomás|nomas|ándale|andale|órale|orale|not important|not|none|private|unknown|why|important|confidential|anonymous)\b/i;
   // Strip accents (decompose + drop combining marks) so accented affirmations
   // like "Si" are caught by the ASCII block-list. Check raw AND stripped.
   const tAscii = t.toLowerCase().replace(/[áàäâã]/g,'a').replace(/[éèëê]/g,'e').replace(/[íìïî]/g,'i').replace(/[óòöôõ]/g,'o').replace(/[úùüû]/g,'u').replace(/ñ/g,'n');
@@ -3775,24 +3846,28 @@ function messageForViola_(session) {
 function officeLineAlreadyGiven_(sessionOrConversation) {
   const conv = Array.isArray(sessionOrConversation) ? sessionOrConversation : ((sessionOrConversation && sessionOrConversation.conversation) || []);
   if (!Array.isArray(sessionOrConversation) && sessionOrConversation && sessionOrConversation.loopGuard && sessionOrConversation.loopGuard.officeHandoffGiven) return true;
-  return conv.some(m => m && m.role === 'assistant' && /(2928|two nine two eight)/i.test(String(m.content || '')) && !/(extension|extensi[oó]n) (three|3|tres)\b/i.test(String(m.content || '')));
+  const phoneLine = conv.some(m => m && m.role === 'assistant' && /(2928|two nine two eight)/i.test(String(m.content || '')) && !/(extension|extensi[oó]n) (three|3|tres)\b/i.test(String(m.content || '')));
+  // D-20261124-14: the first manager handoff no longer recites the office number.
+  const nameFirstHandoff = conv.some(m => m && m.role === 'assistant' && /(what's your first name, and what's it about\?|de qué se trata\?)/i.test(String(m.content || '')));
+  return phoneLine || nameFirstHandoff;
 }
 
-function officeHandoffLine_(session, isSpanish, nowMs) {
+function officeHandoffLine_(session, isSpanish, nowMs, opts) {
+  opts = opts || {};
   const property = (session && session.property) || {};
-  const phone = property.phone || '602-997-2928 extension 1';
   const viola = messageForViola_(session);
   const status = officeStatusLine_(session, isSpanish, nowMs);
-  // D-20261123-01 fix 2: offer the message FIRST, then the office line, the
-  // official hours (said once per call, here), whether it is open RIGHT NOW,
-  // then ask. A second ask never repeats this; see officeSecondAskLine_.
+  // D-20261124-14: ask for the name first, say whether the office is open
+  // right now, and give weekly hours only when the caller asked for them.
+  // A second ask never repeats hours; see officeSecondAskLine_.
+  const whoEn = viola ? 'Viola' : 'the team';
+  const whoEs = viola ? 'Viola' : 'el equipo';
+  const hoursEn = opts.includeHours ? (' ' + formatHoursStatement_(property.hours || '', 'en')) : '';
+  const hoursEs = opts.includeHours ? (' ' + formatHoursStatement_(property.hours_es || property.hours || '', 'es')) : '';
   if (isSpanish) {
-    const hours = formatHoursStatement_(property.hours_es || property.hours || '', 'es');
-    const spokenPhone = String(phone).replace(/extension/i, 'extensión');
-    return 'Claro. Puedo tomarle un mensaje ahora mismo, o puede comunicarse con nuestra oficina al ' + spokenPhone + '. ' + hours + ' ' + status + ' Si deja un mensaje, ' + (viola ? 'Viola le devolverá' : 'el equipo le devolverá') + ' la llamada a este número. ¿Desea dejar un mensaje?';
+    return 'Claro. Puedo tomarle un mensaje para ' + whoEs + '. ' + status + hoursEs + ' ¿Me puede dar su nombre y decirme de qué se trata?';
   }
-  const hours = formatHoursStatement_(property.hours || '', 'en');
-  return 'Of course. I can take a message right now and have ' + (viola ? 'Viola' : 'the team') + ' call you back at this number, or you can reach our office at ' + phone + '. ' + hours + ' ' + status + ' Would you like to leave a message?';
+  return 'Of course. I can take a message for ' + whoEn + '. ' + status + hoursEn + " What's your first name, and what's it about?";
 }
 
 // D-20261123-01 fix 2 (lead 200114): a second ask for a person, after the office
@@ -3821,6 +3896,7 @@ function loopGuardCapturedName_(session) {
   // Filler ("mmm", "uh") is never a name, even if the extractor would take it.
   let n = '';
   try { n = extractCallerName(session) || ''; } catch (e) { n = ''; }
+  if (n && officeRequestIntent_(n)) return '';
   return (n && !looksUnintelligible_(n)) ? n : '';
 }
 
@@ -4219,6 +4295,13 @@ function nextLoopGuardLadderReply_(session, prefer, nowMs) {
     g.lastStep = 'B';
     g.messageFlow = true;
     return { step: 'B', reply: stepBLine_(session), hangUp: false };
+  }
+  // D-20261124-14: after a name is captured, continue the request. Never the main menu.
+  if (loopGuardCapturedName_(session)) {
+    g.lastStep = 'B';
+    g.messageFlow = true;
+    const n = nextMessageFlowLine_(session);
+    return { step: n.close ? 'C' : 'B', reply: n.reply, hangUp: n.close };
   }
   g.lastStep = 'A';
   return { step: 'A', reply: lines.A, hangUp: false };
