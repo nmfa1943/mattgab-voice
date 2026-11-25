@@ -47,10 +47,10 @@ test('B2 no Calendly link is left anywhere in server.js (the intent keyword is a
 });
 
 test('B3 Spanish callers get lang=es, English callers do not', () => {
-  assert.equal(api.tourLinkFor_(NMF, false), 'https://mattgabmanagement.com/tour.php?property=nmf');
-  assert.equal(api.tourLinkFor_(NMF, true), 'https://mattgabmanagement.com/tour.php?property=nmf&lang=es');
-  assert.equal(api.tourLinkFor_(WS, true), 'https://mattgabmanagement.com/tour.php?property=windsong&lang=es');
-  assert.equal(api.tourLinkFor_({ tour_link: 'https://x.test/t' }, true), 'https://x.test/t?lang=es');
+  assert.equal(api.tourLinkFor_(NMF, false), 'https://mattgabmanagement.com/tour.php?property=nmf&src=leo-phone'); // D-20261124-11 source tag
+  assert.equal(api.tourLinkFor_(NMF, true), 'https://mattgabmanagement.com/tour.php?property=nmf&src=leo-phone&lang=es');
+  assert.equal(api.tourLinkFor_(WS, true), 'https://mattgabmanagement.com/tour.php?property=windsong&src=leo-phone&lang=es');
+  assert.equal(api.tourLinkFor_({ tour_link: 'https://x.test/t' }, true), 'https://x.test/t?src=leo-phone&lang=es');
   assert.equal(api.tourLinkFor_({}, true), '');
 });
 
