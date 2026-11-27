@@ -41,7 +41,7 @@ function loadHelpers(env) {
 module.exports = {
   isLockoutOrNoKeys_, afterHoursLockoutIntercept_, lockoutAfterHoursHint_, buildTurnSystemHints, buildSystemPrompt,
   runPromptPipeline, startAiFallback_, aiFallbackTurn_, aiFallbackLeadFields_, aiFallbackName_, handleAiFailure_,
-  runAiFallbackOnSocket_, startCallWatchdog_, initCallLimits_, postLeadToDashboard, forceHangup_,
+  runAiFallbackOnSocket_, startCallWatchdog_, simulateAiFailure_, initCallLimits_, postLeadToDashboard, forceHangup_,
   AI_FALLBACK_LINES, LOCKOUT_AFTER_HOURS_EN, LOCKOUT_AFTER_HOURS_ES, PROPERTIES, DEFAULT_CONTENT,
 };
 `);
@@ -396,4 +396,21 @@ test('LEO_AFTER_HOURS_LOCKOUT=false: no intercept and no hint (old behaviour)', 
   assert.equal(apiOff.afterHoursLockoutIntercept_(sess(NMF0), "I'm locked out", WED_NIGHT), null);
   const conv = [{ role: 'system', content: 'x' }, { role: 'user', content: 'I have no keys' }];
   assert.equal(apiOff.lockoutAfterHoursHint_(conv, { property: NMF0, nowMs: WED_NIGHT }), '');
+});
+test('LEO_SIMULATE_AI_FAILURE is ignored in production, honoured elsewhere', () => {
+  const prodApi = loadHelpers({ LEO_SIMULATE_AI_FAILURE: 'true', RAILWAY_ENVIRONMENT_NAME: 'production' });
+  const stgApi = loadHelpers({ LEO_SIMULATE_AI_FAILURE: 'true', RAILWAY_ENVIRONMENT_NAME: 'staging' });
+  const saved = { a: process.env.LEO_SIMULATE_AI_FAILURE, b: process.env.RAILWAY_ENVIRONMENT_NAME };
+  try {
+    process.env.LEO_SIMULATE_AI_FAILURE = 'true';
+    process.env.RAILWAY_ENVIRONMENT_NAME = 'production';
+    assert.equal(prodApi.simulateAiFailure_(), false);
+    process.env.RAILWAY_ENVIRONMENT_NAME = 'staging';
+    assert.equal(stgApi.simulateAiFailure_(), true);
+    delete process.env.LEO_SIMULATE_AI_FAILURE;
+    assert.equal(stgApi.simulateAiFailure_(), false);
+  } finally {
+    if (saved.a === undefined) delete process.env.LEO_SIMULATE_AI_FAILURE; else process.env.LEO_SIMULATE_AI_FAILURE = saved.a;
+    if (saved.b === undefined) delete process.env.RAILWAY_ENVIRONMENT_NAME; else process.env.RAILWAY_ENVIRONMENT_NAME = saved.b;
+  }
 });

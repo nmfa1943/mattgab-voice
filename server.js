@@ -4811,7 +4811,13 @@ function startCallWatchdog_(ws, getSession, deps) {
 // apology + hang-up. Default is on.
 // ============================================================
 const AI_FALLBACK_ON = process.env.AI_FALLBACK_FLOW !== 'false';
-const AI_FALLBACK_MAX_TURNS = 12;   // hard cap on caller turns inside the flow
+const AI_FALLBACK_MAX_TURNS = 12;
+// Test-call aid for STAGING only: LEO_SIMULATE_AI_FAILURE=true makes every AI
+// turn fail so a real test call can hear the fallback without touching the
+// Anthropic key. Ignored when RAILWAY_ENVIRONMENT_NAME is 'production'.
+function simulateAiFailure_() {
+  return process.env.LEO_SIMULATE_AI_FAILURE === 'true' && process.env.RAILWAY_ENVIRONMENT_NAME !== 'production';
+}   // hard cap on caller turns inside the flow
 
 const AI_FALLBACK_LINES = {
   en: {
@@ -6316,6 +6322,7 @@ fastify.register(async function(fastify) {
             session.activeStreamStartedAt = Date.now();   // pass 17: reply timeout
             session.pendingBufferedTurn = '';
             try {
+              if (simulateAiFailure_()) throw new Error('simulated AI failure (LEO_SIMULATE_AI_FAILURE, staging only)');
               const said = await runLeoTourTurn_(session, systemForTurn, handle, () => {
                 if (!handle.aborted && session.activeStream === handle) ws.send(JSON.stringify({ type: 'text', token: speakableReply_(leoTourFiller_(session.isSpanish), session.isSpanish), last: true }));
               });
@@ -6339,6 +6346,7 @@ fastify.register(async function(fastify) {
             let fullResponse = '';
             let aborted = false;
             let systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish, property: session.property });
+            if (simulateAiFailure_()) throw new Error('simulated AI failure (LEO_SIMULATE_AI_FAILURE, staging only)');
             const stream = anthropic.messages.stream({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 200,
