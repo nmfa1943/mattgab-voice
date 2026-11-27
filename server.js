@@ -6371,6 +6371,99 @@ ${languageEl}    </ConversationRelay>
 </Response>`;
 }
 
+// --- BEGIN LEO AI HEALTH (D-20261127-02) ---
+// Why: Nov 25 8:18 PM to Nov 27 7:41 AM AZ the Anthropic credit balance was empty.
+// The process stayed up, GET / kept answering 200, and every call hung up after the
+// first AI turn. Nothing watched the AI itself, so nobody noticed for ~35 hours.
+// GET /health/ai makes a real 1-token Haiku call (cached, rate-floored so outside
+// requests cannot run up cost) and reports ok / credit / auth / upstream / network.
+// The leasing@ "Mattgab Health Monitor" Apps Script (leo-ai-check.gs) polls it every
+// 5 minutes, confirms 2 failures, emails, caps repeats at 1 per hour, sends recovery.
+// The key never leaves Railway. The body never contains the key or caller data.
+// Kill switch: LEO_AI_HEALTH=off (route answers {status:'disabled'}, no API call).
+const AI_HEALTH_MODEL_ = 'claude-haiku-4-5-20251001';
+const AI_HEALTH_CACHE_MS_ = 240 * 1000;   // normal polls reuse a result younger than 4 min
+const AI_HEALTH_FLOOR_MS_ = 30 * 1000;    // ?fresh=1 still never calls more than once per 30 s
+const AI_HEALTH_TIMEOUT_MS_ = 15 * 1000;
+const aiHealthState_ = { result: null, inFlight: null, lastCallFailureAt: null, lastCallFailureKind: null };
+
+function aiHealthOn_() {
+  return String((process.env.LEO_AI_HEALTH || 'on')).trim().toLowerCase() !== 'off';
+}
+
+// Map an SDK/HTTP error to a category. No message text is trusted for anything but
+// the credit wording, which Anthropic returns as a 400 invalid_request_error.
+function classifyAiError_(err) {
+  const status = Number(err && (err.status || (err.response && err.response.status))) || 0;
+  const msg = String((err && err.message) || '');
+  if (/credit balance/i.test(msg)) return { kind: 'credit', http: status || 400 };
+  if (status === 401 || status === 403) return { kind: 'auth', http: status };
+  if (status === 429) return { kind: 'rate_limited', http: status };
+  if (status >= 500) return { kind: 'upstream', http: status };
+  if (status === 400) return { kind: 'bad_request', http: status };
+  if (/timeout|timed out|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN|fetch failed|Connection error/i.test(msg)) return { kind: 'network', http: status };
+  return { kind: 'other', http: status };
+}
+
+// Short, safe detail for the health body and logs: never echo anything key-shaped.
+function aiHealthSafeDetail_(err) {
+  return String((err && err.message) || '').replace(/sk-ant-[A-Za-z0-9_\-]+/g, '[redacted]').replace(/\s+/g, ' ').slice(0, 160);
+}
+
+// ok/rate_limited mean the key and credits work (429 is throughput, not funding).
+function aiHealthIsOk_(kind) { return kind === 'ok' || kind === 'rate_limited'; }
+
+async function runAiHealthProbe_(client) {
+  const started = Date.now();
+  let timer;
+  try {
+    const call = client.messages.create({ model: AI_HEALTH_MODEL_, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }, { maxRetries: 0 });
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error('AI health probe timed out')), AI_HEALTH_TIMEOUT_MS_); });
+    await Promise.race([call, timeout]);
+    return { ok: true, status: 'ok', http: 200, checked_at: new Date().toISOString(), ms: Date.now() - started };
+  } catch (err) {
+    const c = classifyAiError_(err);
+    return { ok: aiHealthIsOk_(c.kind), status: c.kind, http: c.http, detail: aiHealthSafeDetail_(err), checked_at: new Date().toISOString(), ms: Date.now() - started };
+  } finally { clearTimeout(timer); }
+}
+
+// One real call at most per window; concurrent requests share the in-flight probe.
+async function getAiHealth_(client, opts = {}) {
+  const now = Number(opts.now || Date.now());
+  if (!aiHealthOn_()) return { ok: true, status: 'disabled', checked_at: new Date(now).toISOString() };
+  const r = aiHealthState_.result;
+  const age = r ? now - Date.parse(r.checked_at) : Infinity;
+  const winMs = opts.fresh ? AI_HEALTH_FLOOR_MS_ : AI_HEALTH_CACHE_MS_;
+  if (r && age < winMs) return Object.assign({}, r, { cached: true });
+  if (!aiHealthState_.inFlight) {
+    aiHealthState_.inFlight = runAiHealthProbe_(client)
+      .then(res => { aiHealthState_.result = res; return res; })
+      .finally(() => { aiHealthState_.inFlight = null; });
+  }
+  return Object.assign({}, await aiHealthState_.inFlight, { cached: false });
+}
+
+// Called from the live-call Claude error paths. It does not alert by itself (one
+// transient error must not page anyone); it drops the cache so the next poll makes
+// a fresh real call, and records the failure so the poll can show it.
+function noteAiCallFailure_(err) {
+  try {
+    const c = classifyAiError_(err);
+    aiHealthState_.lastCallFailureAt = new Date().toISOString();
+    aiHealthState_.lastCallFailureKind = c.kind;
+    if (!aiHealthIsOk_(c.kind)) aiHealthState_.result = null;
+    console.error('AI health: live call AI failure kind=' + c.kind + ' http=' + (c.http || 0));
+  } catch (_) { /* never let monitoring break a call */ }
+}
+
+function aiHealthBody_(res) {
+  return Object.assign({ service: 'leo-ai', model: AI_HEALTH_MODEL_ }, res, {
+    last_call_failure_at: aiHealthState_.lastCallFailureAt,
+    last_call_failure_kind: aiHealthState_.lastCallFailureKind,
+  });
+}
+// --- END LEO AI HEALTH ---
+
 // ============================================================
 // FASTIFY SERVER
 // ============================================================
@@ -6381,6 +6474,14 @@ fastify.register(fastifyFormBody);
 // Health check
 fastify.get('/', async (request, reply) => {
   return { status: 'Mattgab Voice AI running' };
+});
+
+// D-20261127-02: AI health (real 1-token call, cached). 200 when the AI works, 503 when not.
+fastify.get('/health/ai', async (request, reply) => {
+  const fresh = String((request.query && request.query.fresh) || '') === '1';
+  const res = await getAiHealth_(anthropic, { fresh });
+  reply.code(res.ok ? 200 : 503).header('Cache-Control', 'no-store');
+  return aiHealthBody_(res);
 });
 
 // TwiML endpoint — called when phone rings
@@ -6593,6 +6694,7 @@ fastify.register(async function(fastify) {
               session.activeStream = null;
               session.pendingBufferedTurn = '';
               console.error('Claude tour-tools error:', err.message);
+              noteAiCallFailure_(err); // D-20261127-02
               // D-20261127-01: scripted fallback (no hang-up). AI_FALLBACK_FLOW=false = old behaviour.
               handleAiFailure_(session, ws, 'stream_error');
             }
@@ -6662,6 +6764,7 @@ fastify.register(async function(fastify) {
               session.activeStream = null;
               session.pendingBufferedTurn = '';
               console.error('Claude stream error:', error.message);
+              noteAiCallFailure_(error); // D-20261127-02
               // D-20261127-01: the AI is gone for this turn - scripted fallback takes a message (no hang-up).
               // AI_FALLBACK_FLOW=false = pass 17 behaviour (apology with the office number, end the call).
               handleAiFailure_(session, ws, 'stream_error');
@@ -6669,6 +6772,7 @@ fastify.register(async function(fastify) {
 
           } catch (err) {
             console.error('Claude error:', err.message);
+            noteAiCallFailure_(err); // D-20261127-02
             // D-20261127-01: scripted fallback (no hang-up). AI_FALLBACK_FLOW=false = old behaviour.
             handleAiFailure_(session, ws, 'stream_start_error');
           }
