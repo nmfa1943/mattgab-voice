@@ -237,6 +237,10 @@ test('store not loaded (fallback): never claims available; office confirms; wait
   const h = api.availabilityWaitlistHint_([{ role: 'system', content: 'x' }, { role: 'user', content: 'is the 2 bedroom available' }], { property: NMF, content: api.DEFAULT_CONTENT });
   assert.doesNotMatch(h, /AVAILABLE NOW/);
   assert.match(h, /Let me have the office confirm current availability for you\./);
+  assert.match(h, /never say "we have" it/);
+  // studios are a known no even on the baseline list
+  const st = api.availabilityWaitlistHint_([{ role: 'system', content: 'x' }, { role: 'user', content: 'any studios' }], { property: NMF, content: api.DEFAULT_CONTENT });
+  assert.match(st, /NOT available right now/);
 });
 
 test('caller asks about the other property: uses that property', () => {

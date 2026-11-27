@@ -4047,6 +4047,8 @@ function unitAvailabilityKind_(propertyKey, type, content) {
   const PUT = P.unit_types || {};
   const u = PUT[type];
   if (!u) return 'unavailable';
+  // A type the store marks not available and not quotable (studios today) is a known "no", even on the baseline list.
+  if (!u.quotable && String(u.status || '') !== 'available') return 'unavailable';
   const AVAIL = Array.isArray(P.available_types) ? P.available_types : Object.keys(PUT).filter(t => PUT[t] && PUT[t].quotable);
   const kind = unitPromptKind_(u, type, AVAIL, isUsingFallbackContent(CCx));
   if (type === 'studio' && kind !== 'available' && kind !== 'confirm_office') return 'unavailable';
@@ -4075,7 +4077,7 @@ function availabilityWaitlistHint_(conversation, opts) {
     return head + 'It is AVAILABLE NOW. Say that clearly in your answer (English: "Yes, the ' + labelEn + ' is available right now." Spanish: "Sí, la de ' + labelEs + ' está disponible en este momento."), give its price from the UNITS list if they asked or you have not said it, then offer the tour. Do not offer the waiting list for this type.' + noPromo + lang;
   }
   if (kind === 'confirm_office') {
-    return head + 'The live list could not be loaded, so do not say it is available. Say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." Then offer the waiting list so the team reaches out: "' + (es ? WL_OFFER_ES_ : WL_OFFER_EN_) + '"' + noPromo + lang;
+    return head + 'The live list could not be loaded, so do not say it is available: never say "we have" it, "it is available", "tenemos" or "disponible(s)" about it. Say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." Then offer the waiting list so the team reaches out: "' + (es ? WL_OFFER_ES_ : WL_OFFER_EN_) + '"' + noPromo + lang;
   }
   const others = availableTypesNow_(key, opts.content).filter(t => t !== type);
   const otherEn = others.length ? ' You may mention, in one short sentence, that the ' + others.map(t => WL_LABEL_EN_[t]).join(' and the ') + ' is available now.' : '';
