@@ -5155,6 +5155,9 @@ async function runAiFallbackOnSocket_(session, ws, input, deps) {
 // 'open' (closed, holiday, or NMF's 5-6 PM appointment-only window), same
 // NMF / WindSong schedule as OFFICE_HOURS. During open hours nothing changes.
 // Deterministic, once per call, before the model; later turns get a hint.
+// Off switch (no redeploy): Railway LEO_AFTER_HOURS_LOCKOUT=false turns off the
+// intercept, the per-turn hint and the lead flag. Default is on.
+const AFTER_HOURS_LOCKOUT_ON = process.env.LEO_AFTER_HOURS_LOCKOUT !== 'false';
 function lockoutAfterHoursNow_(session, nowMs) {
   try {
     const st = officeStatusNow_((session && session.property) || null, nowMs != null ? nowMs : loopGuardNow_(session));
@@ -5166,6 +5169,7 @@ const LOCKOUT_AFTER_HOURS_EN = 'Being locked out or without keys after office ho
 const LOCKOUT_AFTER_HOURS_ES = 'Quedarse afuera o sin llaves fuera del horario de oficina se trata como una emergencia. Por favor llame de inmediato a nuestra línea de mantenimiento al ' + MAINT_LINE_SPOKEN_ES + '. ¿Desea que también le tome un mensaje para la oficina?';
 
 function afterHoursLockoutIntercept_(session, text, nowMs) {
+  if (!AFTER_HOURS_LOCKOUT_ON) return null;
   if (!session || session.afterHoursLockoutGiven) return null;
   if (session.loopGuard && session.loopGuard.hungUp) return null;
   if (!isLockoutOrNoKeys_(text)) return null;
@@ -5181,6 +5185,7 @@ function afterHoursLockoutIntercept_(session, text, nowMs) {
 // Per-turn hint for the model after the intercept (or if it was skipped).
 function lockoutAfterHoursHint_(conversation, opts) {
   opts = opts || {};
+  if (!AFTER_HOURS_LOCKOUT_ON) return '';
   try {
     const recent = recentUserTurns_(conversation, 3).join('\n');
     if (!isLockoutOrNoKeys_(recent)) return '';

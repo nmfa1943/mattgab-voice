@@ -54,7 +54,7 @@ module.exports = {
 const quiet = { log: console.log, warn: console.warn, error: console.error };
 console.log = () => {}; console.warn = () => {}; console.error = () => {};
 const api = loadHelpers({ LEO_OFFICE_HOLIDAYS: '' });
-const apiOff = loadHelpers({ LEO_OFFICE_HOLIDAYS: '', AI_FALLBACK_FLOW: 'false' });
+const apiOff = loadHelpers({ LEO_OFFICE_HOLIDAYS: '', AI_FALLBACK_FLOW: 'false', LEO_AFTER_HOURS_LOCKOUT: 'false' });
 Object.assign(console, quiet);
 
 const NMF = Object.values(api.PROPERTIES).find(p => p.key === 'nmfa');
@@ -390,4 +390,10 @@ test('digits at the name question are taken as the callback number, never as a n
   const r = say(s, 'six oh two five five five zero one nine nine');
   assert.match(r.spoken, /^I have six zero two/);
   assert.equal(s.aiFallback.name, '');
+});
+test('LEO_AFTER_HOURS_LOCKOUT=false: no intercept and no hint (old behaviour)', () => {
+  const NMF0 = Object.values(apiOff.PROPERTIES).find(p => p.key === 'nmfa');
+  assert.equal(apiOff.afterHoursLockoutIntercept_(sess(NMF0), "I'm locked out", WED_NIGHT), null);
+  const conv = [{ role: 'system', content: 'x' }, { role: 'user', content: 'I have no keys' }];
+  assert.equal(apiOff.lockoutAfterHoursHint_(conv, { property: NMF0, nowMs: WED_NIGHT }), '');
 });
