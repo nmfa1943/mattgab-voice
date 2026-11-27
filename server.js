@@ -1334,6 +1334,7 @@ function officeTurnHints_(conversation, opts) {
 function buildTurnSystemHints(conversation, opts) {
   opts = opts || {};
   let suffix = '';
+  suffix += lockoutAfterHoursHint_(conversation, opts);   // D-20261127-01 (b)
   suffix += officeTurnHints_(conversation, opts);
   suffix += nonLeadHint_(conversation, opts);
   suffix += housingReferralHint_(conversation, opts);
@@ -2382,6 +2383,15 @@ function runPromptPipeline(session, userText, modelText, opts) {
   session.conversation = session.conversation || [];
   session.replyCommitted = false;
   session.conversation.push({ role: 'user', content: userText });
+  // D-20261127-01: same order as the live prompt handler (fallback, then after-hours lockout).
+  if (session.aiFallback) {
+    const fbOut = aiFallbackTurn_(session, { text: userText });
+    return { spoken: fbOut.spoken, intercepted: 'ai_fallback', hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: !!fbOut.done, leadSnapshot: null, switchToSpanish: !!fbOut.switchToSpanish };
+  }
+  const lockoutHit = afterHoursLockoutIntercept_(session, userText, opts.nowMs);
+  if (lockoutHit) {
+    return { spoken: lockoutHit.spoken, intercepted: lockoutHit.intercepted, hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: false };
+  }
   const intercepted = interceptAfterUserTurn_(session, { nowMs: opts.nowMs });
   if (intercepted) {
     return { spoken: intercepted.spoken, intercepted: intercepted.intercepted, hints: '', aborted: false, bargeIn: null, preAbort: preAbort, hungUp: !!intercepted.hungUp, leadSnapshot: intercepted.leadSnapshot || null };
@@ -2943,6 +2953,7 @@ MAINTENANCE
 Guide first, escalate only if unresolved.
 
 EMERGENCY (gas, flooding, fire, no heat, no AC in extreme heat, or similar immediate danger): "Please call our Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, immediately. Maintenance emergencies go to the Maintenance line, not to me." Use this emergency script ONLY for those true emergencies. In Spanish, use formal usted: "${MAINT_EMERGENCY_ES}"
+AFTER-HOURS LOCKOUT (D-20261127-01): when the office is closed, a resident who is locked out, has no keys, or is a new move-in who did not get keys is also an EMERGENCY. Give the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, not the office extension one. During office hours, handle it as a normal office request.
 A broken refrigerator, a fridge that is not cooling, or a similar appliance problem is NOT an emergency. Do not use the emergency script for it.
 NON-EMERGENCY MAINTENANCE (including a broken refrigerator): on the SAME turn, do both of these: (1) give the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three, read digit by digit, and (2) take a maintenance message for the lead row: first name if you do not already have it, the unit if they have one, the issue (repeat back what they said if they already told you), and confirm that the number they are calling from is the best callback number — that number is already on the lead from caller ID. Then say you will pass the message to the maintenance team. Never say you cannot take a message. Flag this internally as a maintenance call, not a leasing lead. If the call is in Spanish, use formal usted and give the extension in the same turn ("extensión tres"): "${MAINT_MESSAGE_ES}" Use the emergency script whenever the caller describes danger to people or property, even if not listed.
 SMOKE DETECTOR (non-emergency): Replace 9-volt battery. If it continues, give extension three and take the maintenance message, then offer the portal.
@@ -4575,6 +4586,7 @@ const CALL_LIMIT_LINES = {
 
 function callLimitLine_(kind, session) {
   const es = !!(session && session.isSpanish);
+  if (kind === 'ai_fallback_done') return (session && session.aiFallback && session.aiFallback.goodbye) || '';
   if (kind === 'upstream_closed') {
     const phone = (session && session.property && session.property.phone) || '';
     return es
@@ -4700,7 +4712,8 @@ function forceHangup_(session, ws, reason, detail, deps) {
   const line = callLimitLine_(reason, session);
   if (line) {
     sendRelayRaw_(ws, { type: 'text', token: speakableReply_(line, session.isSpanish), last: true });
-    if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: line });
+    const logged = reason === 'ai_fallback_done' && session.aiFallback && session.aiFallback.goodbyeLogged;
+    if (Array.isArray(session.conversation) && !logged) session.conversation.push({ role: 'assistant', content: line });
   }
   // D-20261120 fix 1: ALWAYS save the call (message and lead) before any close.
   // Started now so it runs during the goodbye; postLeadToDashboard is once-per-call
@@ -4763,6 +4776,8 @@ function startCallWatchdog_(ws, getSession, deps) {
       const decision = evaluateCallLimits_(session, now(), deps.cfg);
       if (!decision) return;
       if (decision.action === 'still_there') sayStillThere_(session, ws, now());
+      // D-20261127-01: an AI reply timeout goes to the scripted fallback, not a hang-up.
+      else if (decision.action === 'hangup' && decision.reason === 'upstream_closed' && (deps.aiFallback != null ? deps.aiFallback : aiFallbackEnabled_())) handleAiFailure_(session, ws, decision.detail, { enabled: true });
       else if (decision.action === 'hangup') forceHangup_(session, ws, decision.reason, decision.detail, deps);
     } catch (e) {
       console.error('Call watchdog error:', e && e.message ? e.message : e);
@@ -4771,6 +4786,420 @@ function startCallWatchdog_(ws, getSession, deps) {
   return function stop() { try { stopEvery(timer); } catch (e) { /* ignore */ } };
 }
 
+
+// ============================================================
+// D-20261127-01 (a): SCRIPTED AI FALLBACK (no AI needed)
+// ============================================================
+// Why: Nov 25 8:18 PM to Nov 27 7:41 AM AZ the Anthropic credits ran out.
+// Every call that reached the model heard "I had a technical issue ... call
+// our office. Goodbye." and was hung up (leads 200147-200150, 200152). No
+// message was taken and no emergency path was offered, including a resident
+// who had just moved in with no keys.
+// Now, when the AI fails (stream error, error starting the stream, or a reply
+// that takes longer than CALL_LLM_TURN_TIMEOUT_MS), Leo does NOT hang up. It
+// switches this call to a scripted flow that never calls the AI again:
+//   1. short apology + maintenance emergency line (ext 3) + "para espanol"
+//   2. name
+//   3. callback number (speech or keypad; "this number" = caller ID), read
+//      back digit by digit, confirmed (2 tries, then caller ID / as heard)
+//   4. reason
+//   5. goodbye (urgent reasons hear ext 3 again), lead saved through the
+//      existing lead POST with "AI FALLBACK" in notes and action, call ended.
+// Spanish: used when the call is already Spanish; the English opening offers
+// "Para espanol, diga espanol" and a Spanish answer switches the flow.
+// Off switch (no redeploy): Railway AI_FALLBACK_FLOW=false restores the old
+// apology + hang-up. Default is on.
+// ============================================================
+const AI_FALLBACK_ON = process.env.AI_FALLBACK_FLOW !== 'false';
+const AI_FALLBACK_MAX_TURNS = 12;
+// Test-call aid for STAGING only: LEO_SIMULATE_AI_FAILURE=true makes every AI
+// turn fail so a real test call can hear the fallback without touching the
+// Anthropic key. Ignored when RAILWAY_ENVIRONMENT_NAME is 'production'.
+function simulateAiFailure_() {
+  return process.env.LEO_SIMULATE_AI_FAILURE === 'true' && process.env.RAILWAY_ENVIRONMENT_NAME !== 'production';
+}   // hard cap on caller turns inside the flow
+
+const AI_FALLBACK_LINES = {
+  en: {
+    open: "I'm sorry, I'm having a technical problem, but I can still take a message for the Matt Gab team. If this is a maintenance emergency, please call " + MAINT_LINE_SPOKEN_EN + ', right away. Para español, diga español. To start, what is your first and last name?',
+    openKnownName: "I'm sorry, I'm having a technical problem, but I can still take a message for the Matt Gab team. If this is a maintenance emergency, please call " + MAINT_LINE_SPOKEN_EN + ', right away. Para español, diga español. What is the best number to call you back? You can say it or type it on your keypad. Or say, this number, to use the number you are calling from.',
+    askName: 'What is your first and last name?',
+    askPhone: 'Thank you. What is the best number to call you back? You can say it or type it on your keypad. Or say, this number, to use the number you are calling from.',
+    phoneAgain: 'I did not catch the full number. Please say it again slowly, starting with the area code, or type it on your keypad.',
+    readback: function (spoken) { return 'I have ' + spoken + '. Is that correct?'; },
+    confirmAgain: 'Sorry, is that number correct? Please say yes or no.',
+    askReason: 'Got it. In a few words, what are you calling about?',
+    askReasonNoNumber: 'Thank you. Our team will also have the number you are calling from. In a few words, what are you calling about?',
+    reasonAgain: 'Sorry, I did not catch that. In a few words, what are you calling about?',
+    byeNormal: 'Thank you. I saved your message, and our team will call you back during office hours. If this is a maintenance emergency, please call ' + MAINT_LINE_SPOKEN_EN + '. Thank you for calling Matt Gab. Goodbye.',
+    byeUrgent: 'Thank you. I saved your message for the office. Because this sounds urgent, please call our maintenance line now, at ' + MAINT_LINE_SPOKEN_EN + '. Thank you for calling Matt Gab. Goodbye.'
+  },
+  es: {
+    open: 'Lo siento, tengo un problema técnico, pero todavía puedo tomarle un mensaje para el equipo de Matt Gab. Si es una emergencia de mantenimiento, por favor llame de inmediato al ' + MAINT_LINE_SPOKEN_ES + '. Para empezar, ¿me puede dar su nombre y apellido?',
+    openKnownName: 'Lo siento, tengo un problema técnico, pero todavía puedo tomarle un mensaje para el equipo de Matt Gab. Si es una emergencia de mantenimiento, por favor llame de inmediato al ' + MAINT_LINE_SPOKEN_ES + '. ¿A qué número le podemos devolver la llamada? Puede decirlo o marcarlo en su teclado. O diga, este número, para usar el número desde el que llama.',
+    askName: '¿Me puede dar su nombre y apellido?',
+    askPhone: 'Gracias. ¿A qué número le podemos devolver la llamada? Puede decirlo o marcarlo en su teclado. O diga, este número, para usar el número desde el que llama.',
+    phoneAgain: 'No escuché el número completo. Por favor repítalo despacio, comenzando con el código de área, o márquelo en su teclado.',
+    readback: function (spoken) { return 'Tengo el ' + spoken + '. ¿Es correcto?'; },
+    confirmAgain: 'Disculpe, ¿es correcto ese número? Por favor diga sí o no.',
+    askReason: 'Muy bien. En pocas palabras, ¿cuál es el motivo de su llamada?',
+    askReasonNoNumber: 'Gracias. Nuestro equipo también tendrá el número desde el que llama. En pocas palabras, ¿cuál es el motivo de su llamada?',
+    reasonAgain: 'Disculpe, no le escuché. En pocas palabras, ¿cuál es el motivo de su llamada?',
+    byeNormal: 'Gracias. Guardé su mensaje y nuestro equipo le devolverá la llamada durante el horario de oficina. Si es una emergencia de mantenimiento, por favor llame al ' + MAINT_LINE_SPOKEN_ES + '. Gracias por llamar a Matt Gab. Adiós.',
+    byeUrgent: 'Gracias. Guardé su mensaje para la oficina. Como esto parece urgente, por favor llame ahora a nuestra línea de mantenimiento al ' + MAINT_LINE_SPOKEN_ES + '. Gracias por llamar a Matt Gab. Adiós.'
+  }
+};
+
+function aiFallbackLines_(session) {
+  return (session && session.isSpanish) ? AI_FALLBACK_LINES.es : AI_FALLBACK_LINES.en;
+}
+
+function aiFallbackEnabled_() { return AI_FALLBACK_ON; }
+
+const AI_FB_SPANISH_ASK_RE_ = /\b(espanol|spanish|en espanol|hablo espanol|habla espanol)\b/;
+const AI_FB_SPANISH_NAME_RE_ = /\b(me llamo|mi nombre es|soy)\b/;
+const AI_FB_THIS_NUMBER_RE_ = /\b(this number|this one|same number|the number i'?m calling (from|on)|number i'?m calling from|calling from|use this|este numero|el mismo|mismo numero|desde el que llamo|de este numero|este mismo)\b/;
+const AI_FB_YES_RE_ = /\b(yes|yeah|yep|yup|correct|that'?s right|right|that is right|si|correcto|asi es|exacto|eso es)\b/;
+const AI_FB_NO_RE_ = /\b(no|nope|wrong|incorrect|not right|that'?s not|incorrecto|equivocado|esta mal)\b/;
+
+// Pull a usable name out of "my name is Rosa Diaz" / "me llamo Rosa" / "Rosa".
+function aiFallbackName_(text) {
+  let t = String(text || '').replace(/[.,!?¿¡]/g, ' ').replace(/\s+/g, ' ').trim();
+  t = t.replace(/^(?:(?:hi|hello|hey|um|uh|yes|yeah|ok|okay|hola|si|bueno|pues)\s+)+/i, '');
+  t = t.replace(/^(?:my name is|my name's|this is|it's|it is|i am|i'm|name is|me llamo|mi nombre es|soy)\s+/i, '');
+  // A number is not a name (the caller answered the wrong question).
+  if (/\d/.test(t)) return '';
+  const numWords = (t.toLowerCase().match(/\b(zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)\b/g) || []).length;
+  if (numWords >= 3) return '';
+  const words = t.split(' ').filter(Boolean).slice(0, 5);
+  if (!words.length) return '';
+  const joined = words.join(' ');
+  if (!/[a-záéíóúñü]/i.test(joined)) return '';
+  if (/^(no|nope|what|huh|hello|hola|que|como)$/i.test(joined)) return '';
+  return joined.substring(0, 60);
+}
+
+// Lockout / no-keys wording (EN + ES). Shared by (a) and (b).
+function isLockoutOrNoKeys_(text) {
+  const t = normalizeForMatch_(text);
+  if (!t.trim()) return false;
+  if (/\b(mailbox|mail box|mail key|buzon|correo)\b/.test(t)) return false;
+  if (/\b(locked out|lock(?:ed)? myself out|locked (?:my |the )?keys? (?:inside|in)|keys? (?:are |is )?locked (?:inside|in)|can'?t get (?:in|into)|cannot get (?:in|into)|can not get (?:in|into)|unable to get (?:in|into))\b/.test(t)) return true;
+  if (/\b(?:no|don'?t have|do not have|doesn'?t have|does not have|didn'?t have|did not have|don'?t got|didn'?t get|did not get|never got|haven'?t gotten|have not gotten|haven'?t got|lost|without|missing|forgot)\s+(?:my |the |any |our |a )?(?:apartment |unit |door |house )?(?:keys?|key fob|fob)\b/.test(t)) return true;
+  if (/\b(me quede (?:afuera|fuera)|quede (?:afuera|fuera)|me quedo (?:afuera|fuera)|cerrad[oa] (?:afuera|fuera)|no puedo entrar|no podemos entrar|no tengo (?:las |mis |la |mi )?llaves?|sin (?:las |mis )?llaves?|perdi (?:las |mis |la |mi )?llaves?|no me dieron (?:las |la )?llaves?|no nos dieron (?:las |la )?llaves?|no tenemos (?:las |la )?llaves?)\b/.test(t)) return true;
+  return false;
+}
+
+function aiFallbackUrgent_(text) {
+  try { return isTrueEmergency(text) || isLockoutOrNoKeys_(text); } catch (e) { return false; }
+}
+
+// Enter the flow. Returns the opening line (also pushed to the conversation).
+function startAiFallback_(session, detail) {
+  if (!session) return '';
+  if (session.aiFallback) return '';
+  session.aiFallback = {
+    step: 'name', detail: String(detail || 'ai_error'), startedAt: Date.now(),
+    name: '', phone: '', phoneStatus: '', reason: '', urgent: false,
+    nameTries: 0, phoneTries: 0, confirmTries: 0, reasonTries: 0, turns: 0, dtmf: '', done: false
+  };
+  const fb = session.aiFallback;
+  // Use what the caller already said before the AI failed: a name (skip the
+  // name question) and an emergency / lockout (keep it as the reason).
+  let known = '';
+  try { known = extractCallerName(session) || ''; } catch (e) { known = ''; }
+  if (known) { fb.name = String(known).substring(0, 60); fb.step = 'phone'; }
+  try {
+    const prior = recentUserTurns_(session.conversation, 3);
+    const urgentLine = prior.filter((l) => aiFallbackUrgent_(l)).pop();
+    if (urgentLine) { fb.urgent = true; fb.reason = String(urgentLine).replace(/\s+/g, ' ').trim().substring(0, 300); }
+  } catch (e) { /* keep defaults */ }
+  const L = aiFallbackLines_(session);
+  const line = known ? L.openKnownName : L.open;
+  if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: line });
+  return line;
+}
+
+function aiFallbackSetPhone_(session, raw) {
+  const fb = session.aiFallback;
+  const n = normalizeUsPhone_(raw);
+  if (!n) return '';
+  fb.phone = n;
+  fb.step = 'confirm_phone';
+  fb.confirmTries = 0;
+  return aiFallbackLines_(session).readback(speakPhoneGrouped_(n, session.isSpanish));
+}
+
+function aiFallbackFinish_(session) {
+  const fb = session.aiFallback;
+  fb.step = 'done';
+  fb.done = true;
+  const L = aiFallbackLines_(session);
+  return fb.urgent ? L.byeUrgent : L.byeNormal;
+}
+
+// One caller turn inside the flow. input = { text } or { digit }.
+// Returns { spoken, switchToSpanish, done }. Never calls the AI. The caller's
+// own words are already in session.conversation (the prompt handler pushes them).
+function aiFallbackTurn_(session, input) {
+  const fb = session && session.aiFallback;
+  if (!fb || fb.done) return { spoken: '', switchToSpanish: false, done: !!(fb && fb.done) };
+  input = input || {};
+  let switchToSpanish = false;
+  const say = (s) => {
+    const out = { spoken: s, switchToSpanish: switchToSpanish, done: !!fb.done };
+    if (s && Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: s });
+    return out;
+  };
+  const L0 = () => aiFallbackLines_(session);
+
+  // Keypad entry: only meaningful while we wait for a number (or a yes/no).
+  if (input.digit != null) {
+    const d = String(input.digit);
+    if (fb.step === 'phone') {
+      if (d === '*') { fb.dtmf = ''; return { spoken: '', switchToSpanish: false, done: false }; }
+      if (/^\d$/.test(d)) fb.dtmf += d;
+      const ready = (fb.dtmf.length === 10 && fb.dtmf.charAt(0) !== '1') || fb.dtmf.length === 11 || (d === '#' && fb.dtmf.length >= 10);
+      if (!ready) return { spoken: '', switchToSpanish: false, done: false };
+      const digits = fb.dtmf; fb.dtmf = '';
+      const rb = aiFallbackSetPhone_(session, digits);
+      if (rb) { fb.turns++; return say(rb); }
+      fb.phoneTries++;
+      return say(L0().phoneAgain);
+    }
+    if (fb.step === 'confirm_phone' && (d === '1' || d === '2')) {
+      return aiFallbackTurn_(session, { text: d === '1' ? 'yes' : 'no', fromDigit: true });
+    }
+    return { spoken: '', switchToSpanish: false, done: false };
+  }
+
+  const raw = String(input.text || '');
+  const t = normalizeForMatch_(raw);
+  fb.turns++;
+  if (raw.trim() && aiFallbackUrgent_(raw)) fb.urgent = true;
+  if (fb.turns > AI_FALLBACK_MAX_TURNS) return say(aiFallbackFinish_(session));
+
+  if (fb.step === 'name') {
+    if (!session.isSpanish && (AI_FB_SPANISH_ASK_RE_.test(t) || AI_FB_SPANISH_NAME_RE_.test(t))) {
+      session.isSpanish = true;
+      switchToSpanish = true;
+      if (AI_FB_SPANISH_ASK_RE_.test(t) && !AI_FB_SPANISH_NAME_RE_.test(t)) return say(AI_FALLBACK_LINES.es.askName);
+    }
+    // "I'm locked out!" instead of a name: keep it as the reason, ask the name once more.
+    if (aiFallbackUrgent_(raw) && !fb.reason) {
+      fb.reason = raw.replace(/\s+/g, ' ').trim().substring(0, 300);
+      fb.nameTries++;
+      if (fb.nameTries < 2) return say(L0().askName);
+      fb.step = 'phone';
+      return say(L0().askPhone);
+    }
+    // A phone number instead of a name: take it as the callback number.
+    const numsAtName = phonesInText_(raw);
+    if (numsAtName.length) {
+      const rb = aiFallbackSetPhone_(session, numsAtName[numsAtName.length - 1]);
+      if (rb) return say(rb);
+    }
+    const name = aiFallbackName_(raw);
+    if (!name) {
+      fb.nameTries++;
+      if (fb.nameTries < 2) return say(L0().askName);
+    }
+    fb.name = name;
+    fb.step = 'phone';
+    return say(L0().askPhone);
+  }
+
+  if (fb.step === 'phone') {
+    const nums = phonesInText_(raw);
+    if (nums.length) {
+      const rb = aiFallbackSetPhone_(session, nums[nums.length - 1]);
+      if (rb) return say(rb);
+    }
+    if (AI_FB_THIS_NUMBER_RE_.test(t) && normalizeUsPhone_(session.from)) {
+      const rb = aiFallbackSetPhone_(session, session.from);
+      if (rb) { session.aiFallback.fromCallerId = true; return say(rb); }
+    }
+    fb.phoneTries++;
+    if (fb.phoneTries < 2) return say(L0().phoneAgain);
+    fb.phone = normalizeUsPhone_(session.from) || '';
+    fb.phoneStatus = 'not captured, caller ID used';
+    if (fb.reason) return say(aiFallbackFinish_(session));
+    fb.step = 'reason';
+    return say(L0().askReasonNoNumber);
+  }
+
+  if (fb.step === 'confirm_phone') {
+    // A new number in the reply replaces the old one and is read back.
+    const nums = phonesInText_(raw);
+    if (nums.length && normalizeUsPhone_(nums[nums.length - 1]) !== fb.phone) {
+      fb.phoneTries++;
+      const rb = aiFallbackSetPhone_(session, nums[nums.length - 1]);
+      if (rb) return say(rb);
+    }
+    const yes = AI_FB_YES_RE_.test(t) && !/\b(no|not|incorrect|incorrecto)\b/.test(t);
+    const no = !yes && AI_FB_NO_RE_.test(t);
+    if (yes) {
+      fb.phoneStatus = fb.fromCallerId ? 'confirmed (caller ID)' : 'confirmed';
+      if (fb.reason) return say(aiFallbackFinish_(session));
+      fb.step = 'reason';
+      return say(L0().askReason);
+    }
+    if (no) {
+      fb.phoneTries++;
+      if (fb.phoneTries < 2) { fb.step = 'phone'; fb.phone = ''; fb.fromCallerId = false; return say(L0().phoneAgain); }
+      fb.phoneStatus = 'unconfirmed (as heard)';
+      if (fb.reason) return say(aiFallbackFinish_(session));
+      fb.step = 'reason';
+      return say(L0().askReasonNoNumber);
+    }
+    fb.confirmTries++;
+    if (fb.confirmTries < 2) return say(L0().confirmAgain);
+    fb.phoneStatus = 'unconfirmed (as heard)';
+    if (fb.reason) return say(aiFallbackFinish_(session));
+    fb.step = 'reason';
+    return say(L0().askReason);
+  }
+
+  if (fb.step === 'reason') {
+    const r = raw.replace(/\s+/g, ' ').trim();
+    if (!r || r.length < 2) {
+      fb.reasonTries++;
+      if (fb.reasonTries < 2) return say(L0().reasonAgain);
+    }
+    fb.reason = r.substring(0, 300);
+    if (fb.reason && aiFallbackUrgent_(fb.reason)) fb.urgent = true;
+    return say(aiFallbackFinish_(session));
+  }
+
+  return { spoken: '', switchToSpanish: false, done: !!fb.done };
+}
+
+// Lead fields for a fallback call (no AI summary: the AI is down).
+function aiFallbackLeadFields_(session) {
+  const fb = session && session.aiFallback;
+  if (!fb) return null;
+  const name = fb.name || '';
+  const phone = fb.phone || normalizeUsPhone_(session.from) || session.from || '';
+  const phoneNote = fb.phone ? (phone + (fb.phoneStatus ? ' (' + fb.phoneStatus + ')' : ' (not confirmed, caller hung up)')) : ((session.from || 'unknown') + ' (caller ID; no callback number given)');
+  const reason = fb.reason || '(not given; caller hung up before the reason)';
+  const lockoutAfterHours = !!session.afterHoursLockout;
+  const notesPrefix = 'AI FALLBACK (Leo AI was unavailable: ' + fb.detail + '). Scripted message taken, no AI reply on this call.\n'
+    + 'Name: ' + (name || '(not given)') + '\n'
+    + 'Callback: ' + phoneNote + '\n'
+    + 'Reason: ' + reason + '\n'
+    + (fb.urgent ? 'URGENT: caller described an emergency, lockout or no keys. Caller was given maintenance extension 3.\n' : '')
+    + (lockoutAfterHours ? 'AFTER-HOURS LOCKOUT: caller was sent to maintenance extension 3.\n' : '')
+    + '\n';
+  const ai_summary = ('AI FALLBACK: Leo AI was down, scripted message taken. ' + (name || 'Caller') + ' asked for a callback'
+    + (fb.reason ? ' about: ' + fb.reason : '') + '.').substring(0, 300);
+  const ai_action = ((fb.urgent ? 'AI FALLBACK - MAINTENANCE EMERGENCY / CALLBACK REQUESTED: ' : 'AI FALLBACK - CALLBACK REQUESTED: ')
+    + 'Call back ' + (name || 'the caller') + ' at ' + phone + (fb.reason ? ' about: ' + fb.reason : '') + '.').substring(0, 240);
+  return { name: name, phone: phone, notesPrefix: notesPrefix, ai_summary: ai_summary, ai_action: ai_action };
+}
+
+function estimateSpeechMs_(text) {
+  return Math.min(30000, Math.max(CALL_HANGUP_GRACE_MS, String(text || '').length * 75));
+}
+
+// Wire-up for the live socket. Enters the flow (once), stops any reply still
+// generating, speaks the opening. Old behaviour when AI_FALLBACK_FLOW=false.
+function handleAiFailure_(session, ws, detail, deps) {
+  deps = deps || {};
+  if (!session) return false;
+  const stream = session.activeStream;
+  session.activeStream = null;
+  session.pendingBufferedTurn = '';
+  if (stream && typeof stream.abort === 'function') { try { stream.abort(); } catch (e) { /* already ended */ } }
+  const enabled = deps.enabled != null ? deps.enabled : aiFallbackEnabled_();
+  if (!enabled) {
+    if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', detail, deps); return false; }
+    const fallback = session.isSpanish
+      ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
+      : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
+    if (ws) ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+    return false;
+  }
+  if (session.aiFallback) return true;       // already in the flow
+  if (session.callLimits && session.callLimits.ending) return false;
+  console.warn(`AI fallback: entered detail=${detail} callSid=${session.callSid || 'unknown'}`);
+  const line = startAiFallback_(session, detail);
+  if (session.callLimits) { session.callLimits.lastActivityAt = Date.now(); session.callLimits.stillTherePromptedAt = null; }
+  if (line && ws) sendRelayRaw_(ws, { type: 'text', token: speakableReply_(line, session.isSpanish), last: true });
+  return true;
+}
+
+// Run one fallback turn on the live socket, then end the call when done.
+async function runAiFallbackOnSocket_(session, ws, input, deps) {
+  deps = deps || {};
+  const out = aiFallbackTurn_(session, input);
+  if (out.switchToSpanish && ws) {
+    session.languageSwitched = true;
+    session.spanishVoiceAttempt = 0;
+    session.spanishSwitchAt = Date.now();
+    try { ws.send(JSON.stringify(buildSpanishLanguageMessage_(0))); } catch (e) { /* ignore */ }
+  }
+  if (out.spoken && !out.done && ws) {
+    ws.send(JSON.stringify({ type: 'text', token: speakableReply_(out.spoken, session.isSpanish), last: true }));
+  }
+  if (out.done) {
+    // forceHangup_ speaks the goodbye ('ai_fallback_done'), saves the lead, then ends the call.
+    session.aiFallback.goodbye = out.spoken;
+    // The goodbye is already in the conversation (aiFallbackTurn_ pushed it); forceHangup_ must not add it twice.
+    session.aiFallback.goodbyeLogged = true;
+    return forceHangup_(session, ws, 'ai_fallback_done', session.aiFallback.detail, Object.assign({ graceMs: estimateSpeechMs_(out.spoken) }, deps));
+  }
+  return out;
+}
+
+// ============================================================
+// D-20261127-01 (b): AFTER-HOURS LOCKOUT / NO KEYS = EMERGENCY -> ext 3
+// ============================================================
+// Why: Nov 25 ~8:16 PM AZ a resident who moved in that day had no keys.
+// Leo gave Viola's office ext 1 (closed) five times and never offered
+// maintenance (lead 200146-200150). Jenea, Nov 27: after hours, lockouts and
+// no keys go to maintenance ext 3. "After hours" = officeStatusNow_ is not
+// 'open' (closed, holiday, or NMF's 5-6 PM appointment-only window), same
+// NMF / WindSong schedule as OFFICE_HOURS. During open hours nothing changes.
+// Deterministic, once per call, before the model; later turns get a hint.
+// Off switch (no redeploy): Railway LEO_AFTER_HOURS_LOCKOUT=false turns off the
+// intercept, the per-turn hint and the lead flag. Default is on.
+const AFTER_HOURS_LOCKOUT_ON = process.env.LEO_AFTER_HOURS_LOCKOUT !== 'false';
+function lockoutAfterHoursNow_(session, nowMs) {
+  try {
+    const st = officeStatusNow_((session && session.property) || null, nowMs != null ? nowMs : loopGuardNow_(session));
+    return st.state !== 'open';
+  } catch (e) { return false; }
+}
+
+const LOCKOUT_AFTER_HOURS_EN = 'Being locked out or without keys after office hours is treated as an emergency. Please call our maintenance line right away, at ' + MAINT_LINE_SPOKEN_EN + '. Would you like me to also take a message for the office?';
+const LOCKOUT_AFTER_HOURS_ES = 'Quedarse afuera o sin llaves fuera del horario de oficina se trata como una emergencia. Por favor llame de inmediato a nuestra línea de mantenimiento al ' + MAINT_LINE_SPOKEN_ES + '. ¿Desea que también le tome un mensaje para la oficina?';
+
+function afterHoursLockoutIntercept_(session, text, nowMs) {
+  if (!AFTER_HOURS_LOCKOUT_ON) return null;
+  if (!session || session.afterHoursLockoutGiven) return null;
+  if (session.loopGuard && session.loopGuard.hungUp) return null;
+  if (!isLockoutOrNoKeys_(text)) return null;
+  if (!lockoutAfterHoursNow_(session, nowMs)) return null;
+  session.afterHoursLockout = true;
+  session.afterHoursLockoutGiven = true;
+  const spoken = session.isSpanish ? LOCKOUT_AFTER_HOURS_ES : LOCKOUT_AFTER_HOURS_EN;
+  if (Array.isArray(session.conversation)) session.conversation.push({ role: 'assistant', content: spoken });
+  session.replyCommitted = true;
+  return { spoken: spoken, intercepted: 'after_hours_lockout' };
+}
+
+// Per-turn hint for the model after the intercept (or if it was skipped).
+function lockoutAfterHoursHint_(conversation, opts) {
+  opts = opts || {};
+  if (!AFTER_HOURS_LOCKOUT_ON) return '';
+  try {
+    const recent = recentUserTurns_(conversation, 3).join('\n');
+    if (!isLockoutOrNoKeys_(recent)) return '';
+    const st = officeStatusNow_(opts.property || null, opts.nowMs != null ? opts.nowMs : Date.now());
+    if (st.state === 'open') return '';
+    return '\n\nTHIS TURN ONLY: the office is CLOSED right now and the caller is locked out or has no keys (including a new move-in without keys). After hours this is a maintenance EMERGENCY: the caller must call the Maintenance line at six oh two, nine nine seven, two nine two eight, extension three. Do NOT send them to the office extension one or to Viola for this. If you take a message, also remind them to call extension three now.';
+  } catch (e) { return ''; }
+}
 
 // ============================================================
 // GENERATE CALL SUMMARY + ACTION RECOMMENDATION
@@ -4838,6 +5267,8 @@ Respond with ONLY the JSON object, no preamble, no code fence. Example: {"summar
 
 async function generateCallSummary(session) {
   if (!session || !session.conversation) return { ai_summary: '', ai_action: '' };
+  // D-20261127-01: the AI is down on a fallback call; do not wait on it again.
+  if (session.aiFallback) return { ai_summary: '', ai_action: '' };
 
   // Build a clean transcript for the summarizer prompt. Filter out the
   // system prompt and cap length so we don't blow up token budget.
@@ -4898,7 +5329,7 @@ async function postLeadToDashboard(session) {
     .map(m => `${m.role === 'user' ? 'CALLER' : 'AI'}: ${m.content}`)
     .join('\n');
 
-  const callerName = extractCallerName(session);
+  let callerName = extractCallerName(session);   // D-20261127-01: let (AI fallback name wins)
 
   // TRANSCRIPT LENGTH. This was 4000 characters, which silently cut the end off
   // 23 of 673 calls — and the end is where a call goes wrong. One truncated call
@@ -5055,6 +5486,31 @@ async function postLeadToDashboard(session) {
     summary = 'HOUSING PROGRAM REFERRAL (caller is a housing authority, housing program or caseworker; their client is the prospect).\n' + summary;
   }
 
+  // D-20261127-01 (b): after-hours lockout / no keys was sent to maintenance ext 3.
+  if (session.afterHoursLockout && !session.aiFallback) {
+    summary = 'AFTER-HOURS LOCKOUT: caller was locked out or had no keys while the office was closed, and was sent to maintenance extension 3.\n' + summary;
+    if (!/MAINTENANCE EMERGENCY/i.test(ai_action_final || '')) {
+      ai_action_final = ('MAINTENANCE EMERGENCY: after-hours lockout or no keys, caller sent to extension 3. ' + String(ai_action_final || '')).trim().substring(0, 240);
+    }
+  }
+  // D-20261127-01 (a): scripted AI fallback. The name, callback number and reason
+  // the caller gave win; notes and action say AI FALLBACK so staff can sort on it.
+  // A fallback call is never filed as spam (the AI could not judge it).
+  let fallbackAiSummary = null;
+  const fbFields = aiFallbackLeadFields_(session);
+  if (fbFields) {
+    if (fbFields.name) callerName = fbFields.name;
+    if (fbFields.phone) storedPhone = fbFields.phone;
+    if (leadStatus === SPAM_LEAD_STATUS) {
+      leadStatus = 'new';
+      summary = summary.replace(/^SPAM \(robocall, sales pitch or scam\)\. Not a sales lead\. No callback needed\.\n/, '');
+    }
+    summary = fbFields.notesPrefix + summary;
+    ai_action_final = fbFields.ai_action;
+    fallbackAiSummary = fbFields.ai_summary;
+  }
+  const ai_summary_final = fallbackAiSummary != null ? fallbackAiSummary : ai_summary;
+
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
   if (ai_action_final) console.log(`Call action: ${ai_action_final}`);
 
@@ -5071,7 +5527,7 @@ async function postLeadToDashboard(session) {
         language: session.isSpanish ? 'es' : 'en',
         summary,
         status:   leadStatus,
-        ai_summary,
+        ai_summary: ai_summary_final,
         ai_action: ai_action_final,
       }),
     });
@@ -5797,6 +6253,22 @@ fastify.register(async function(fastify) {
           session.replyCommitted = false;
           session.conversation.push({ role: 'user', content: text });
 
+          // D-20261127-01 (a): the AI already failed on this call. Stay in the
+          // scripted fallback (name, callback read-back, reason). No AI call.
+          if (session.aiFallback) {
+            await runAiFallbackOnSocket_(session, ws, { text: text });
+            break;
+          }
+
+          // D-20261127-01 (b): after hours, a lockout or no-keys call is an
+          // emergency. Give maintenance ext 3 once, before any other script.
+          const lockoutHit = afterHoursLockoutIntercept_(session, text);
+          if (lockoutHit) {
+            console.log('after_hours_lockout intercepted');
+            ws.send(JSON.stringify({ type: 'text', token: speakableReply_(lockoutHit.spoken, session.isSpanish), last: true }));
+            break;
+          }
+
           // PRE-LLM INTERCEPT: v38 callback read-back first (2-attempt cap),
           // then the v39 loop guard (keywords, stall ladder, time caps).
           const intercepted = interceptAfterUserTurn_(session, {});
@@ -5850,6 +6322,7 @@ fastify.register(async function(fastify) {
             session.activeStreamStartedAt = Date.now();   // pass 17: reply timeout
             session.pendingBufferedTurn = '';
             try {
+              if (simulateAiFailure_()) throw new Error('simulated AI failure (LEO_SIMULATE_AI_FAILURE, staging only)');
               const said = await runLeoTourTurn_(session, systemForTurn, handle, () => {
                 if (!handle.aborted && session.activeStream === handle) ws.send(JSON.stringify({ type: 'text', token: speakableReply_(leoTourFiller_(session.isSpanish), session.isSpanish), last: true }));
               });
@@ -5863,11 +6336,8 @@ fastify.register(async function(fastify) {
               session.activeStream = null;
               session.pendingBufferedTurn = '';
               console.error('Claude tour-tools error:', err.message);
-              if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_error'); break; }
-              const fallback = session.isSpanish
-                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
-                : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
-              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+              // D-20261127-01: scripted fallback (no hang-up). AI_FALLBACK_FLOW=false = old behaviour.
+              handleAiFailure_(session, ws, 'stream_error');
             }
             break;
           }
@@ -5876,6 +6346,7 @@ fastify.register(async function(fastify) {
             let fullResponse = '';
             let aborted = false;
             let systemForTurn = session.conversation[0].content + buildTurnSystemHints(session.conversation, { isSpanish: session.isSpanish, property: session.property });
+            if (simulateAiFailure_()) throw new Error('simulated AI failure (LEO_SIMULATE_AI_FAILURE, staging only)');
             const stream = anthropic.messages.stream({
               model: 'claude-haiku-4-5-20251001',
               max_tokens: 200,
@@ -5934,21 +6405,15 @@ fastify.register(async function(fastify) {
               session.activeStream = null;
               session.pendingBufferedTurn = '';
               console.error('Claude stream error:', error.message);
-              // Pass 17: the AI is gone for this turn - apologise with the office number and end the call.
-              if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_error'); return; }
-              const fallback = session.isSpanish
-                ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
-                : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
-              ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+              // D-20261127-01: the AI is gone for this turn - scripted fallback takes a message (no hang-up).
+              // AI_FALLBACK_FLOW=false = pass 17 behaviour (apology with the office number, end the call).
+              handleAiFailure_(session, ws, 'stream_error');
             });
 
           } catch (err) {
             console.error('Claude error:', err.message);
-            if (CALL_LIMITS_ENABLED) { forceHangup_(session, ws, 'upstream_closed', 'stream_start_error'); break; }
-            const fallback = session.isSpanish
-              ? 'Lo siento, tuve un problema. Por favor llame a nuestra oficina al ' + session.property.phone + '.'
-              : 'I apologize, I had a technical issue. Please call our office at ' + session.property.phone;
-            ws.send(JSON.stringify({ type: 'text', token: speakableReply_(fallback, session.isSpanish), last: true }));
+            // D-20261127-01: scripted fallback (no hang-up). AI_FALLBACK_FLOW=false = old behaviour.
+            handleAiFailure_(session, ws, 'stream_start_error');
           }
           break;
         }
@@ -5978,6 +6443,11 @@ fastify.register(async function(fastify) {
         case 'dtmf': {
           // Pass 17: a keypress is caller activity for the silence watchdog (no other handling).
           noteCallActivity_(sessions.get(ws.callSid), Date.now());
+          // D-20261127-01: keypad callback number while in the AI fallback.
+          const dtmfSession = sessions.get(ws.callSid);
+          if (dtmfSession && dtmfSession.aiFallback && !dtmfSession.aiFallback.done && msg.digit != null) {
+            await runAiFallbackOnSocket_(dtmfSession, ws, { digit: String(msg.digit) });
+          }
           break;
         }
 
