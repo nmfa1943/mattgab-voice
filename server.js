@@ -3925,7 +3925,10 @@ const WRAP_UP_RE_ = /^(so |well |ok |okay |alright |yeah |no |um |uh )*(ok|okay|
 function isNameAsk_(text) {
   const t = String(text || '');
   if (/\bspell\b|deletrear/i.test(t)) return false;
-  return NAME_ASK_ANY_RE_.test(t);
+  if (NAME_ASK_ANY_RE_.test(t)) return true;
+  // Any other question about the caller's name ("can you tell me your first name so ...?",
+  // "your first name is L-V, correct?"). Checked per sentence so "Thanks, Maria. Any questions?" never counts.
+  return String(t).split(/(?<=[.?!])\s+/).some(x => /[?¿]/.test(x) && /\b(your (first )?name|su (primer )?nombre)\b/i.test(x));
 }
 function nameAskCount_(session) {
   const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];

@@ -167,6 +167,11 @@ test('under the cap the existing name asks are unchanged', () => {
   console.log = log;
   // a spelling request is not counted as a new name ask
   assert.equal(api.isNameAsk_('Sorry, could you spell your first name for me?'), false);
+  // other phrasings seen on the staging sim count as name asks
+  assert.equal(api.isNameAsk_('I want to make sure I get this right. Can you tell me your first name so I can leave a message for the team?'), true);
+  assert.equal(api.isNameAsk_('So I can pass this along, what is your first name?'), true);
+  assert.equal(api.isNameAsk_('Thanks, Maria. Is there anything else I can help you with?'), false);
+  assert.equal(api.isNameAsk_('Gracias, Lucía. ¿Para cuándo piensa mudarse?'), false);
 });
 
 test('Spanish: goodbye then "gracias" closes in formal Spanish; capped ask stripped', () => {
