@@ -133,6 +133,12 @@ test('AI name ask after goodbye is removed, even when the caller asks a new ques
   assert.doesNotMatch(out[0].spoken, /first name/i);
 });
 
+test('goodbye detection covers the closing variants seen on staging; greeting does not count', () => {
+  const mk = (line) => ({ conversation: [{ role: 'system', content: 'x' }, { role: 'assistant', content: 'Thanks for calling North Mountain Foothills. How can I help you today?' }, { role: 'assistant', content: line }] });
+  for (const l of ['Looking forward to hearing from you. Reach out anytime by call or text.', 'Looking forward to meeting you, Maria.', 'Bye!', 'Thank you for calling. Goodbye.', 'Espero conocerle, Lucía.', 'Gracias por llamar. Adiós.']) assert.equal(api.leoSaidGoodbye_(mk(l)), true, l);
+  assert.equal(api.leoSaidGoodbye_(mk('Is there anything else I can help you with?')), false);
+});
+
 test('wrap-up detection: short acknowledgements end, "wait" and real questions do not', () => {
   for (const t of ['Okay.', "That's it.", "So that'll be all.", 'LV, man.', 'Thanks, bye', 'Gracias', 'Eso es todo', '', 'mmm']) assert.equal(api.isWrapUpUtterance_(t), true, t);
   for (const t of ['Wait', 'Hold on, one more thing', 'Do you allow pets?', 'Is the two bedroom available', 'Actually I need the address']) assert.equal(api.isWrapUpUtterance_(t), false, t);

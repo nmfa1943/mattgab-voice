@@ -3919,7 +3919,7 @@ function officeSecondAskLine_(session, isSpanish, nowMs) {
 const NAME_LOOP_FIX_ON_ = process.env.LEO_NAME_LOOP_FIX !== 'false';
 const NAME_ASK_CAP_ = 2;
 const NAME_ASK_ANY_RE_ = /(may i (get|have|ask) your (first )?name|can i (get|grab|have) your (first )?name|what(?:'s| is) your (first )?name|your (first )?name,? please|who am i speaking (with|to)|(?:me )?(?:puede|podr[ií]a|pudiera) (?:dar|decir|proporcionar)(?:me)? su (?:primer )?nombre|cu[aá]l es su (?:primer )?nombre|su (?:primer )?nombre,? por favor|(?:me )?(?:da|dice) su (?:primer )?nombre|c[oó]mo se llama usted)/i;
-const LEO_GOODBYE_RE_ = /(looking forward to meeting you|espero conocerle|\bgoodbye\b|\bbye\b|adi[oó]s\b|have a (great|good|nice|wonderful) (day|night|evening|afternoon|weekend)|que tenga (un )?(buen|excelente|lindo) d[ií]a)/i;
+const LEO_GOODBYE_RE_ = /(looking forward to (meeting|hearing from|seeing|talking (to|with)) you|reach out anytime by call or text|espero conocerle|\bgoodbye\b|\bbye\b|adi[oó]s\b|have a (great|good|nice|wonderful) (day|night|evening|afternoon|weekend)|que tenga (un )?(buen|excelente|lindo) d[ií]a)/i;
 const WRAP_UP_RE_ = /^(so |well |ok |okay |alright |yeah |no |um |uh )*(ok|okay|okey|alright|all right|thanks|thank you|thank you so much|thanks so much|bye|bye bye|goodbye|that'?s it|that is it|that'?s all|that is all|that'?ll be all|that will be all|that'?d be all|that'?s everything|nothing|nothing else|no thanks|no thank you|i'?m good|i'?m done|we'?re good|got it|cool|perfect|great|sounds good|have a good (one|day)|you too|gracias|muchas gracias|adios|es todo|eso es todo|eso seria todo|nada|nada mas|esta bien|bueno|perfecto|igualmente)( (man|ma'?am|sir|then|bye|thanks|thank you|gracias|adios|for now))*$/;
 
 function isNameAsk_(text) {
