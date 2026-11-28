@@ -5,7 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --test check-lead-headers.js check-v36.js check-d20261120.js check-d20261120-05.js check-d20261120-13.js check-d20261123-01.js check-d20261123-03.js check-d20261124-10.js check-d20261124-14.js check-d20261124-11.js check-d20261125-07.js check-d20261127-01.js check-d20261127-04.js"
+    "test": "node --test check-lead-headers.js check-v36.js check-d20261120.js check-d20261120-05.js check-d20261120-13.js check-d20261123-01.js check-d20261123-03.js check-d20261124-10.js check-d20261124-14.js check-d20261124-11.js check-d20261125-07.js check-d20261127-01.js check-d20261127-04.js check-d20261127-02.js"
   },
   "dependencies": {
     "fastify": "^4.28.1",
