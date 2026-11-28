@@ -1342,6 +1342,7 @@ function buildTurnSystemHints(conversation, opts) {
   suffix += petFollowupHint_(conversation, opts);
   suffix += nameSpellHint_(conversation, opts);
   suffix += nameContinueHint_(conversation, opts);
+  suffix += availabilityWaitlistHint_(conversation, opts);   // D-20261127-04
   if (shouldAskOpenQuestion(conversation)) {
     const q = opts.isSpanish ? OPEN_QUESTION_ES : OPEN_QUESTION_EN;
     suffix += '\n\nTHIS TURN ONLY: the caller has given two unclear one-word replies to an either/or question. Do not repeat the either/or. Ask one open question: "' + q + '"';
@@ -2318,6 +2319,7 @@ function commitAssistantReply(session, rawText, opts) {
   spoken = ensureMaintenanceExtension_(spoken, session.conversation, opts);
   spoken = ensureIntakeBeforeClose_(spoken, session, opts);   // D-20261123-01 fix 3
   spoken = rewriteMenuAfterName_(spoken, session, opts);      // D-20261124-14
+  spoken = capNameAsks_(spoken, session, opts);               // D-20261127-04: max 2 name asks, none after goodbye
   session.conversation = session.conversation || [];
   session.conversation.push({ role: 'assistant', content: spoken });
   session.replyCommitted = true;
@@ -3192,6 +3194,7 @@ function isValidName_(s) {
   if (!s) return false;
   const t = String(s).trim().replace(/[.,!?¿¡]+$/, '').trim();
   if (t.length < 2 || t.length > 50) return false;
+  if (isWrapUpNotName_(t)) return false;   // D-20261127-04 (lead 200102: "So that'll be all.")
   // Expanded May 21, 2026 after weekly audit found 27 of 33 leads
   // landing with junk names. New rejections cover transfer-intent,
   // resident-status, vendor, and Spanish recovery phrases.
@@ -3887,11 +3890,245 @@ function officeHandoffLine_(session, isSpanish, nowMs, opts) {
 function officeSecondAskLine_(session, isSpanish, nowMs) {
   const viola = messageForViola_(session);
   const status = officeStatusLine_(session, isSpanish, nowMs);
-  const named = !!loopGuardCapturedName_(session);
+  const named = !!loopGuardCapturedName_(session) || !nameAskAllowed_(session);   // D-20261127-04 cap
   if (isSpanish) {
     return status + ' Le tomo el mensaje ahora mismo para que ' + (viola ? 'Viola' : 'el equipo') + ' le devuelva la llamada. ' + (named ? '¿Qué desea que le diga' + (viola ? ' a Viola' : ' al equipo') + '?' : '¿Me puede dar su nombre?');
   }
   return status + " I'll take your message right now so " + (viola ? 'Viola' : 'the team') + ' can call you back. ' + (named ? 'What would you like me to tell ' + (viola ? 'Viola' : 'them') + '?' : 'Can I get your first name?');
+}
+
+// ============================================================
+// D-20261127-04 (STAGED): name-loop fix and availability / waitlist offer.
+// ============================================================
+// Name loop (lead 200102, Nov 19 2026 about 2:06 PM AZ). Leo said its closing
+// line, the caller said "Okay.", and the loop guard's message flow treated that
+// as a no-progress turn with the name still missing ("L period v period l v"
+// failed isValidName_), so it asked "Sorry, what's your first name?" again.
+// Nothing in the guard knew Leo had already said goodbye. On Nov 19 there was
+// no cap at all, so it asked 4 times; with D-20261120 fix 1 it still asked once
+// after goodbye, then stored the caller's "So that'll be all." as the name and
+// asked for the callback number again. The fix:
+// 1. After Leo's goodbye, a short wrap-up from the caller ("okay", "that's it",
+//    a name fragment, noise) gets one short goodbye and the call ends. A real
+//    new question still goes to the AI, which may answer but may not ask the name.
+// 2. Name asks are capped at NAME_ASK_CAP_ (2) per call, across the guard's
+//    scripted lines and the AI's own lines. Past the cap Leo takes the message
+//    without a name (graceful fallback).
+// 3. Wrap-up phrases ("that'll be all", "that's it") are never stored as a name.
+// LEO_NAME_LOOP_FIX=false turns all three off (pre-D-20261127-04 behaviour).
+const NAME_LOOP_FIX_ON_ = process.env.LEO_NAME_LOOP_FIX !== 'false';
+const NAME_ASK_CAP_ = 2;
+const NAME_ASK_ANY_RE_ = /(may i (get|have|ask) your (first )?name|can i (get|grab|have) your (first )?name|what(?:'s| is) your (first )?name|your (first )?name,? please|who am i speaking (with|to)|(?:me )?(?:puede|podr[ií]a|pudiera) (?:dar|decir|proporcionar)(?:me)? su (?:primer )?nombre|cu[aá]l es su (?:primer )?nombre|su (?:primer )?nombre,? por favor|(?:me )?(?:da|dice) su (?:primer )?nombre|c[oó]mo se llama usted)/i;
+const LEO_GOODBYE_RE_ = /(looking forward to (meeting|hearing from|seeing|talking (to|with)) you|reach out anytime by call or text|espero conocerle|\bgoodbye\b|\bbye\b|adi[oó]s\b|have a (great|good|nice|wonderful) (day|night|evening|afternoon|weekend)|que tenga (un )?(buen|excelente|lindo) d[ií]a)/i;
+const WRAP_UP_RE_ = /^(so |well |ok |okay |alright |yeah |no |um |uh )*(ok|okay|okey|alright|all right|thanks|thank you|thank you so much|thanks so much|bye|bye bye|goodbye|that'?s it|that is it|that'?s all|that is all|that'?ll be all|that will be all|that'?d be all|that'?s everything|nothing|nothing else|no thanks|no thank you|i'?m good|i'?m done|we'?re good|got it|cool|perfect|great|sounds good|have a good (one|day)|you too|gracias|muchas gracias|adios|es todo|eso es todo|eso seria todo|nada|nada mas|esta bien|bueno|perfecto|igualmente)( (man|ma'?am|sir|then|bye|thanks|thank you|gracias|adios|for now))*$/;
+
+function isNameAsk_(text) {
+  const t = String(text || '');
+  if (/\bspell\b|deletrear/i.test(t)) return false;
+  if (NAME_ASK_ANY_RE_.test(t)) return true;
+  // Any other question about the caller's name ("can you tell me your first name so ...?",
+  // "your first name is L-V, correct?"). Checked per sentence so "Thanks, Maria. Any questions?" never counts.
+  return String(t).split(/(?<=[.?!])\s+/).some(x => /[?¿]/.test(x) && /\b(your (first )?name|su (primer )?nombre)\b/i.test(x));
+}
+function nameAskCount_(session) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  let n = 0;
+  for (let i = 0; i < turns.length; i++) {
+    if (turns[i] && turns[i].role === 'assistant' && isNameAsk_(turns[i].content)) n++;
+  }
+  return n;
+}
+// Has Leo already said its closing line on this call? (The opening greeting
+// never matches: it has no bye / goodbye / looking forward to meeting you.)
+function leoSaidGoodbye_(session) {
+  const turns = (session && Array.isArray(session.conversation)) ? session.conversation : [];
+  for (let i = 0; i < turns.length; i++) {
+    const m = turns[i];
+    if (m && m.role === 'assistant' && LEO_GOODBYE_RE_.test(String(m.content || '').replace(/\[cut off by caller\]/g, ''))) return true;
+  }
+  return false;
+}
+// May Leo ask for the caller's name on this turn?
+function nameAskAllowed_(session) {
+  if (!NAME_LOOP_FIX_ON_) return true;
+  if (leoSaidGoodbye_(session)) return false;
+  return nameAskCount_(session) < NAME_ASK_CAP_;
+}
+function isWrapUpUtterance_(text) {
+  const norm = normalizeLoopText_(text);
+  if (!norm) return true;
+  // The caller is not done: "wait", "one more thing", "actually...".
+  if (/\b(wait|hold on|hang on|one more|another question|actually|question|espere|espera|otra pregunta|una pregunta|una cosa mas)\b/.test(norm)) return false;
+  if (looksUnintelligible_(text)) return true;
+  if (WRAP_UP_RE_.test(norm)) return true;
+  if (/[?¿]/.test(String(text || ''))) return false;
+  // Short fragment with no request in it ("LV, man.", "L v."): not a new question.
+  if (loopGuardWordCount_(text) <= 3 && !broaderLoopIntent_(text) && !loopGuardKeywordIntent_(text)) return true;
+  return false;
+}
+// A wrap-up phrase is never a name ("So that'll be all." on lead 200102).
+function isWrapUpNotName_(s) {
+  if (!NAME_LOOP_FIX_ON_) return false;
+  const norm = normalizeLoopText_(s);
+  return !!norm && WRAP_UP_RE_.test(norm);
+}
+// After Leo's goodbye: a wrap-up turn gets one short goodbye and the call ends
+// (the lead is saved as usual by the guard's hang-up path).
+function postGoodbyeIntercept_(session, nowMs) {
+  if (!NAME_LOOP_FIX_ON_ || !session) return null;
+  if (!leoSaidGoodbye_(session)) return null;
+  if (inActiveCallbackReadback_(session)) return null;
+  const userText = lastTurnByRole_(session, 'user');
+  if (!isWrapUpUtterance_(userText)) return null;
+  const g = ensureLoopGuardState_(session, nowMs);
+  const lines = loopGuardLines_(!!session.isSpanish, session);
+  const spoken = commitLoopGuardReply_(session, lines.bye, {});
+  g.saveRequested = true;
+  g.hungUp = true;
+  g.lastStep = 'goodbye';
+  g.userTurns = userTurnCount_(session);
+  logLoopGuardStep_(session, 'post_goodbye_close');
+  return { spoken: spoken, intercepted: 'post_goodbye_close', hungUp: true, leadSnapshot: null };
+}
+// AI reply filter: past the cap, or after goodbye, drop the name-ask sentence.
+// If nothing is left, ask for the message (or say goodbye after goodbye).
+function capNameAsks_(spoken, session, opts) {
+  if (!NAME_LOOP_FIX_ON_ || !session) return spoken;
+  if (!isNameAsk_(spoken) || nameAskAllowed_(session)) return spoken;
+  const isSpanish = !!(opts && opts.isSpanish) || !!session.isSpanish;
+  const parts = String(spoken).split(/(?<=[.?!])\s+/);
+  const kept = parts.filter(x => !isNameAsk_(x)).join(' ').trim();
+  console.log('Name ask capped (D-20261127-04): asks=' + nameAskCount_(session) + ' goodbye=' + leoSaidGoodbye_(session));
+  if (kept && /[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1]{3}/i.test(kept) && !/^(got it|thanks|thank you|gracias|perfect|perfecto|okay|ok)[.!]?$/i.test(kept)) return kept;
+  const lines = loopGuardLines_(isSpanish, session);
+  if (leoSaidGoodbye_(session)) return lines.bye;
+  return loopGuardHasMessage_(session) ? lines.askCallback : lines.askMessage;
+}
+
+// ---- Availability and waitlist ------------------------------------------------
+// When the caller asks about a unit type (studio, 1, 2 or 3 bedroom), a
+// per-turn hint tells the AI, from the SAME live content store the prompt's
+// UNITS block uses (content-api.php available_types / unit status), whether
+// that type is available now, and if not, to offer the waiting list. If the
+// caller says yes to the waiting list (or asks to be put on it), the lead POST
+// carries "WAITLIST:" in notes and ai_action with the unit type and property,
+// plus bedrooms (1/2/3). Status stays as before (the dashboard Waitlist tab is
+// status 'waitlist', which also stops follow-up texts), unless Railway
+// LEO_WAITLIST_STATUS=true. LEO_WAITLIST_OFFER=false turns the hint and the
+// tagging off.
+const WAITLIST_OFFER_ON_ = process.env.LEO_WAITLIST_OFFER !== 'false';
+const WAITLIST_STATUS_ON_ = process.env.LEO_WAITLIST_STATUS === 'true';
+const WL_LABEL_EN_ = { studio: 'studio', '1br': 'one bedroom', '2br': 'two bedroom', '3br': 'three bedroom' };
+const WL_LABEL_ES_ = { studio: 'estudio', '1br': 'una recámara', '2br': 'dos recámaras', '3br': 'tres recámaras' };
+const WL_OFFER_EN_ = 'Those do open up as people move out, so I can add you to our waiting list and have our team reach out the moment one becomes available. Would you like me to add you?';
+const WL_OFFER_ES_ = 'Esas unidades se desocupan cuando alguien se muda, así que puedo agregarle a nuestra lista de espera para que nuestro equipo le avise en cuanto haya una disponible. ¿Desea que le agregue?';
+
+function unitTypeInText_(text) {
+  const f = normalizeLoopText_(text);
+  if (!f) return '';
+  if (/\b(studio|studios|efficiency|estudio|estudios)\b/.test(f)) return 'studio';
+  if (/\b(3|three|tres)\s*(bed(room)?s?|br|bd|recamaras?|cuartos?|habitacion(es)?|dormitorios?)\b/.test(f)) return '3br';
+  if (/\b(2|two|dos)\s*(bed(room)?s?|br|bd|recamaras?|cuartos?|habitacion(es)?|dormitorios?)\b/.test(f)) return '2br';
+  if (/\b(1|one|una|un)\s*(bed(room)?s?|br|bd|recamaras?|cuartos?|habitacion(es)?|dormitorios?)\b/.test(f)) return '1br';
+  return '';
+}
+function propertyKeyInText_(text) {
+  const f = normalizeLoopText_(text);
+  if (/\b(windsong|wind song)\b/.test(f)) return 'windsong';
+  if (/\b(nmfa|nmf|north mountain|foothills)\b/.test(f)) return 'nmfa';
+  return '';
+}
+function propertyByKey_(key) {
+  if (typeof PROPERTIES === 'undefined') return null;
+  return Object.values(PROPERTIES).find(p => p && p.key === key) || null;
+}
+// 'available' | 'coming_soon' | 'unavailable' | 'confirm_office', from the live store.
+function unitAvailabilityKind_(propertyKey, type, content) {
+  const CCx = content || (typeof CONTENT_CACHE !== 'undefined' ? CONTENT_CACHE : null);
+  const P = CCx && CCx.properties && CCx.properties[propertyKey];
+  if (!P) return 'confirm_office';
+  const PUT = P.unit_types || {};
+  const u = PUT[type];
+  if (!u) return 'unavailable';
+  // A type the store marks not available and not quotable (studios today) is a known "no", even on the baseline list.
+  if (!u.quotable && String(u.status || '') !== 'available') return 'unavailable';
+  const AVAIL = Array.isArray(P.available_types) ? P.available_types : Object.keys(PUT).filter(t => PUT[t] && PUT[t].quotable);
+  const kind = unitPromptKind_(u, type, AVAIL, isUsingFallbackContent(CCx));
+  if (type === 'studio' && kind !== 'available' && kind !== 'confirm_office') return 'unavailable';
+  return kind;
+}
+function availableTypesNow_(propertyKey, content) {
+  return ['1br', '2br', '3br', 'studio'].filter(t => unitAvailabilityKind_(propertyKey, t, content) === 'available');
+}
+function availabilityWaitlistHint_(conversation, opts) {
+  opts = opts || {};
+  if (!WAITLIST_OFFER_ON_) return '';
+  const lastUser = recentUserTurns_(conversation, 1).join(' ');
+  const type = unitTypeInText_(lastUser);
+  if (!type) return '';
+  const key = propertyKeyInText_(lastUser) || (opts.property && opts.property.key) || '';
+  const prop = propertyByKey_(key);
+  if (!prop) return '';
+  const kind = unitAvailabilityKind_(key, type, opts.content);
+  const es = !!opts.isSpanish;
+  const labelEn = WL_LABEL_EN_[type], labelEs = WL_LABEL_ES_[type];
+  const pname = prop.name || key;
+  const head = '\n\nTHIS TURN ONLY (availability, live price list): the caller asked about the ' + labelEn + ' at ' + pname + '. ';
+  const lang = es ? ' Reply in Spanish, formal usted only.' : '';
+  const noPromo = ' Never mention specials, concessions or discounts. Describe utilities only with the UNITS list wording (electric, water, sewer and trash included).';
+  if (kind === 'available') {
+    return head + 'It is AVAILABLE NOW. Say that clearly in your answer (English: "Yes, the ' + labelEn + ' is available right now." Spanish: "Sí, la de ' + labelEs + ' está disponible en este momento."), give its price from the UNITS list if they asked or you have not said it, then offer the tour. Do not offer the waiting list for this type.' + noPromo + lang;
+  }
+  if (kind === 'confirm_office') {
+    return head + 'The live list could not be loaded, so do not say it is available: never say "we have" it, "it is available", "tenemos" or "disponible(s)" about it. Say: "Let me have the office confirm current availability for you." / "Permítame pedirle a la oficina que le confirme la disponibilidad actual." Then offer the waiting list so the team reaches out: "' + (es ? WL_OFFER_ES_ : WL_OFFER_EN_) + '"' + noPromo + lang;
+  }
+  const others = availableTypesNow_(key, opts.content).filter(t => t !== type);
+  const otherEn = others.length ? ' You may mention, in one short sentence, that the ' + others.map(t => WL_LABEL_EN_[t]).join(' and the ') + ' is available now.' : '';
+  const pricePart = kind === 'coming_soon' ? 'Say its price first, as in the UNITS list, then say clearly that it is not available right now' : 'Say clearly that it is not available right now (do not quote a price for it)';
+  return head + 'It is NOT available right now. ' + pricePart + ' (English: "The ' + labelEn + ' is not available right now." Spanish: "La de ' + labelEs + ' no está disponible en este momento."). Then, on this same turn, offer the waiting list: "' + (es ? WL_OFFER_ES_ : WL_OFFER_EN_) + '"' + otherEn + ' If they say yes, confirm they are on the list for the ' + labelEn + ' at ' + pname + '. Never promise a date and never say a unit will open.' + noPromo + lang;
+}
+
+const WL_OFFER_RE_ = /(waiting list|waitlist|wait list|lista de espera)/i;
+const WL_SELF_ASK_RE_ = /\b(put|add|place|sign) me (up )?(on|to|for) (the |your |a )?(waiting list|waitlist|wait list)\b|\b(join|get on|be on) (the |your |a )?(waiting list|waitlist|wait list)\b|\b(agr[eé]gueme|ap[uú]nteme|p[oó]ngame|me (puede|pueden) (agregar|apuntar|poner)) (a |en )?(la |su )?lista de espera\b/i;
+// Did the caller ask to be put on the waiting list on this call? Returns
+// { type, propertyKey } (type may be '' when no unit type was said) or null.
+function waitlistRequest_(session) {
+  if (!WAITLIST_OFFER_ON_ || !session || !Array.isArray(session.conversation)) return null;
+  const conv = session.conversation;
+  let type = '', propKey = '', accepted = false;
+  for (let i = 0; i < conv.length; i++) {
+    const m = conv[i];
+    if (!m || m.role === 'system') continue;
+    const txt = String(m.content || '');
+    if (m.role === 'user') {
+      const t = unitTypeInText_(txt); if (t) type = t;
+      const pk = propertyKeyInText_(txt); if (pk) propKey = pk;
+      if (WL_SELF_ASK_RE_.test(txt) && !/\b(no|not|don'?t|nope)\b.{0,15}(waiting list|waitlist|lista de espera)/i.test(txt)) accepted = true;
+      continue;
+    }
+    // Leo offered the waiting list: the caller's next turn decides.
+    if (m.role === 'assistant' && WL_OFFER_RE_.test(txt) && /[?¿]/.test(txt)) {
+      if (!type) { const t2 = unitTypeInText_(txt); if (t2) type = t2; }
+      const nxt = conv.slice(i + 1).find(x => x && x.role === 'user');
+      if (nxt && isConsentAffirmative(nxt.content || '')) accepted = true;
+      if (nxt && /\b(add me|put me|sign me up|agr[eé]gueme|ap[uú]nteme)\b/i.test(nxt.content || '') && !/\b(no|don'?t)\b/i.test(nxt.content || '')) accepted = true;
+    }
+  }
+  if (!accepted) return null;
+  return { type: type, propertyKey: propKey || (session.property && session.property.key) || '' };
+}
+function waitlistLeadTag_(session) {
+  const w = waitlistRequest_(session);
+  if (!w) return null;
+  const prop = propertyByKey_(w.propertyKey);
+  const pname = (prop && prop.name) || w.propertyKey || 'property';
+  const unit = w.type ? WL_LABEL_EN_[w.type] : 'unit type not given';
+  return {
+    notes: 'WAITLIST: caller asked to be added to the waiting list for a ' + unit + ' at ' + pname + '.\n',
+    action: 'WAITLIST: add to waitlist for ' + unit + ' at ' + pname + '.',
+    bedrooms: ({ '1br': 1, '2br': 2, '3br': 3 })[w.type] || null,
+    type: w.type, propertyKey: w.propertyKey
+  };
 }
 
 // D-20261120 fix 1 (leads 200091, 200096, 200097, 200098, 200101, 200102):
@@ -3928,7 +4165,8 @@ function stallCloseLine_(session) {
 
 function stepBLine_(session) {
   const lines = loopGuardLines_(!!(session && session.isSpanish), session);
-  return loopGuardCapturedName_(session) ? lines.Bnamed : lines.B;
+  // D-20261127-04: past the name-ask cap, take the message without the name.
+  return (loopGuardCapturedName_(session) || !nameAskAllowed_(session)) ? lines.Bnamed : lines.B;
 }
 
 // Next message-flow question for a no-progress turn. Never the name when one
@@ -3940,7 +4178,7 @@ function nextMessageFlowLine_(session) {
   const asked = function (line) { return normalizeLoopText_(line) === lastLeo; };
   if (!loopGuardCapturedName_(session)) {
     // Ask the name at most once more; after that take the message without it.
-    if (!g.nameReasked && !asked(lines.nameAgain)) { g.nameReasked = true; return { reply: lines.nameAgain, close: false }; }
+    if (!g.nameReasked && !asked(lines.nameAgain) && nameAskAllowed_(session)) { g.nameReasked = true; return { reply: lines.nameAgain, close: false }; }
     if (!loopGuardHasMessage_(session) && !g.messageAsked) { g.messageAsked = true; return { reply: lines.askMessage, close: false }; }
     return { reply: stallCloseLine_(session), close: true };
   }
@@ -4403,7 +4641,7 @@ function runLoopGuardTurn_(session, nowMs) {
     if (classified.keyword.intent === 'message') {
       g.messageFlow = true;
       // Never re-ask a captured name.
-      if (loopGuardCapturedName_(session)) { raw = loopGuardLines_(replyLang, session).askMessage; g.messageAsked = true; }
+      if (loopGuardCapturedName_(session) || !nameAskAllowed_(session)) { raw = loopGuardLines_(replyLang, session).askMessage; g.messageAsked = true; }
       // D-20261123-01 fix 2: second ask for a person goes straight to the message, with open-now status.
       if (secondOfficeAsk) { raw = officeSecondAskLine_(session, replyLang, nowMs); if (loopGuardCapturedName_(session)) g.messageAsked = true; }
     }
@@ -4496,6 +4734,9 @@ function interceptAfterUserTurn_(session, opts) {
     }
     return { spoken: cbSpoken, intercepted: 'callback_readback', hungUp: false };
   }
+  // D-20261127-04: after Leo's goodbye, a wrap-up turn ends the call politely (no name re-ask).
+  const afterBye = postGoodbyeIntercept_(session, nowMs);
+  if (afterBye) return afterBye;
   const guard = runLoopGuardTurn_(session, nowMs);
   if (guard) return guard;
   return null;
@@ -5510,6 +5751,21 @@ async function postLeadToDashboard(session) {
     fallbackAiSummary = fbFields.ai_summary;
   }
   const ai_summary_final = fallbackAiSummary != null ? fallbackAiSummary : ai_summary;
+  // D-20261127-04: the caller asked to go on the waiting list. Flag it in notes
+  // and action (unit type + property); bedrooms 1/2/3 when known. Status only
+  // changes to 'waitlist' with LEO_WAITLIST_STATUS=true (that status also stops follow-up texts).
+  let waitlistBedrooms = null;
+  const wlTag = (!fbFields && leadStatus !== SPAM_LEAD_STATUS && !nonLead) ? waitlistLeadTag_(session) : null;
+  if (wlTag) {
+    summary = wlTag.notes + summary;
+    const restWl = String(ai_action_final || '').replace(/^\s*WAITLIST:[^.]*\.\s*/i, '');
+    ai_action_final = /MAINTENANCE EMERGENCY/i.test(restWl)
+      ? (restWl + ' ' + wlTag.action).substring(0, 240)
+      : (wlTag.action + (restWl ? ' ' + restWl : '')).substring(0, 240);
+    waitlistBedrooms = wlTag.bedrooms;
+    if (WAITLIST_STATUS_ON_ && leadStatus === 'new') leadStatus = 'waitlist';
+    console.log('Waitlist request flagged (D-20261127-04): ' + wlTag.action);
+  }
 
   if (ai_summary)      console.log(`Call summary: ${ai_summary.substring(0, 100)}...`);
   if (ai_action_final) console.log(`Call action: ${ai_action_final}`);
@@ -5529,6 +5785,7 @@ async function postLeadToDashboard(session) {
         status:   leadStatus,
         ai_summary: ai_summary_final,
         ai_action: ai_action_final,
+        ...(waitlistBedrooms ? { bedrooms: waitlistBedrooms } : {}),   // D-20261127-04
       }),
     });
     if (!res.ok) {
